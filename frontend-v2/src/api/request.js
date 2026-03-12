@@ -23,12 +23,12 @@ request.interceptors.request.use(
 // 响应拦截器
 request.interceptors.response.use(
   (response) => {
-    const res = response.data
-    if (res.code !== 200) {
-      ElMessage.error(res.message || '请求失败')
-      return Promise.reject(new Error(res.message || '请求失败'))
+    const { code, message, data } = response.data
+    if (code !== 200) {
+      ElMessage.error(message || '请求失败')
+      return Promise.reject(new Error(message))
     }
-    return res.data
+    return data
   },
   (error) => {
     const message = error.response?.data?.message || error.message || '网络错误'

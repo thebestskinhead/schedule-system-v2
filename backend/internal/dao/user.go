@@ -195,3 +195,21 @@ func (d *UserDAO) GetByDeptRole(deptRole string) ([]model.User, error) {
 	err := db.GetDB().Select(&users, query, deptRole)
 	return users, err
 }
+
+// GetByDepartmentAndRole 按部门和角色获取用户
+func (d *UserDAO) GetByDepartmentAndRole(department, deptRole string) ([]model.User, error) {
+	var users []model.User
+	query := `SELECT id, student_id, name, email, role, department, dept_role, is_active, created_at 
+			  FROM users WHERE is_active = 1 AND department = ? AND dept_role = ? ORDER BY id DESC`
+	err := db.GetDB().Select(&users, query, department, deptRole)
+	return users, err
+}
+
+// GetByRole 按系统角色获取用户
+func (d *UserDAO) GetByRole(role string) ([]model.User, error) {
+	var users []model.User
+	query := `SELECT id, student_id, name, email, role, department, dept_role, is_active, created_at 
+			  FROM users WHERE is_active = 1 AND role = ? ORDER BY id DESC`
+	err := db.GetDB().Select(&users, query, role)
+	return users, err
+}

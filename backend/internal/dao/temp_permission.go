@@ -1,6 +1,7 @@
 package dao
 
 import (
+	"context"
 	"time"
 	"schedule-system-v2/backend/internal/db"
 	"schedule-system-v2/backend/internal/model"
@@ -44,6 +45,16 @@ func (d *TempPermissionDAO) GetActiveByUserID(userID int) ([]model.UserPermissio
 	var perms []model.UserPermissionTemp
 	query := `SELECT * FROM user_permissions_temp 
 			  WHERE user_id = ? AND is_active = TRUE AND expires_at > NOW()
+			  ORDER BY created_at DESC`
+	err := db.GetDB().Select(&perms, query, userID)
+	return perms, err
+}
+
+// GetByUserID 获取用户的所有临时权限（包括已过期的）
+func (d *TempPermissionDAO) GetByUserID(ctx context.Context, userID int) ([]model.UserPermissionTemp, error) {
+	var perms []model.UserPermissionTemp
+	query := `SELECT * FROM user_permissions_temp 
+			  WHERE user_id = ?
 			  ORDER BY created_at DESC`
 	err := db.GetDB().Select(&perms, query, userID)
 	return perms, err

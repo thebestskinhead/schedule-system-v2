@@ -20,14 +20,10 @@ func NewTempPermissionHandler() *TempPermissionHandler {
 	}
 }
 
-// GrantPermission 授予临时权限
+// GrantPermission 授予临时权限（支持批量）
+// 注意：权限检查由路由层的 PermUserManageDept 中间件处理
 func (h *TempPermissionHandler) GrantPermission(c *gin.Context) {
-	// 权限检查 - 只有系统管理员可以授权
 	checker := auth.GetChecker(c)
-	if !checker.IsAdmin() {
-		auth.ResponseForbidden(c, "只有系统管理员可以授予临时权限")
-		return
-	}
 
 	var req model.GrantPermissionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -41,24 +37,52 @@ func (h *TempPermissionHandler) GrantPermission(c *gin.Context) {
 	}
 
 	adminID := auth.GetUserIDFromContext(c)
-	if err := h.service.GrantPermission(adminID, &req); err != nil {
-		utils.Error(c, 500, err.Error())
+	
+	// 批量授权
+	var failedUsers []string
+	for _, userID := range req.UserIDs {
+		singleReq := model.SingleGrantRequest{
+			UserID:       userID,
+			Permission:   req.Permission,
+			ResourceType: req.ResourceType,
+			ResourceID:   req.ResourceID,
+			ExpiresAt:    req.ExpiresAt,
+			Reason:       req.Reason,
+		}
+		if err := h.service.GrantPermission(adminID, checker, &singleReq); err != nil {
+			failedUsers = append(failedUsers, err.Error())
+		}
+	}
+
+	if len(failedUsers) > 0 && len(failedUsers) == len(req.UserIDs) {
+		utils.Error(c, 500, "授权失败: "+failedUsers[0])
 		return
 	}
 
-	utils.Success(c, nil)
+	utils.Success(c, gin.H{
+		"message": "授权成功",
+		"total":   len(req.UserIDs),
+		"failed":  len(failedUsers),
+	})
 }
 
-// GetAllPermissions 获取所有临时权限
+// GetAllPermissions 获取临时权限列表（支持按部门筛选）
+// 注意：权限检查由路由层的 PermUserManageDept 中间件处理
 func (h *TempPermissionHandler) GetAllPermissions(c *gin.Context) {
-	// 权限检查 - 只有系统管理员可以查看所有权限
 	checker := auth.GetChecker(c)
-	if !checker.IsAdmin() {
-		auth.ResponseForbidden(c, "只有系统管理员可以查看所有临时权限")
-		return
+
+	var perms []model.TempPermissionView
+	var err error
+
+	// 系统管理员/办公室管理员查看所有，部门管理员只查看自己部门的
+	if checker.IsAdmin() || checker.IsOfficeAdmin() {
+		perms, err = h.service.GetAllActivePermissions()
+	} else {
+		// 部门管理员只能看到自己部门的权限
+		dept := checker.GetDepartment()
+		perms, err = h.service.GetPermissionsByDepartment(dept)
 	}
 
-	perms, err := h.service.GetAllActivePermissions()
 	if err != nil {
 		utils.Error(c, 500, "获取权限列表失败: "+err.Error())
 		return
@@ -68,13 +92,9 @@ func (h *TempPermissionHandler) GetAllPermissions(c *gin.Context) {
 }
 
 // RevokePermission 撤销临时权限
+// 注意：权限检查由路由层的 PermUserManageDept 中间件处理
 func (h *TempPermissionHandler) RevokePermission(c *gin.Context) {
-	// 权限检查 - 只有系统管理员可以撤销
 	checker := auth.GetChecker(c)
-	if !checker.IsAdmin() {
-		auth.ResponseForbidden(c, "只有系统管理员可以撤销临时权限")
-		return
-	}
 
 	idStr := c.Param("id")
 	id, err := strconv.Atoi(idStr)
@@ -84,7 +104,7 @@ func (h *TempPermissionHandler) RevokePermission(c *gin.Context) {
 	}
 
 	adminID := auth.GetUserIDFromContext(c)
-	if err := h.service.RevokePermission(adminID, id); err != nil {
+	if err := h.service.RevokePermission(adminID, checker, id); err != nil {
 		utils.Error(c, 500, err.Error())
 		return
 	}
@@ -100,7 +120,8 @@ func (h *TempPermissionHandler) GetMyPermissions(c *gin.Context) {
 		return
 	}
 
-	perms, err := h.service.GetMyPermissions(userID)
+	// 使用 GetUserTempPermissions 返回与 GetAllPermissions 一致的格式
+	perms, err := h.service.GetUserTempPermissions(userID)
 	if err != nil {
 		utils.Error(c, 500, "获取权限失败: "+err.Error())
 		return
@@ -123,14 +144,8 @@ func (h *TempPermissionHandler) GetPermissionList(c *gin.Context) {
 }
 
 // CleanupExpired 手动触发清理过期权限（管理员）
+// 注意：权限检查由路由层的 PermSystemAdmin 中间件处理
 func (h *TempPermissionHandler) CleanupExpired(c *gin.Context) {
-	// 权限检查
-	checker := auth.GetChecker(c)
-	if !checker.IsAdmin() {
-		auth.ResponseForbidden(c)
-		return
-	}
-
 	if err := h.service.CleanupExpiredPermissions(); err != nil {
 		utils.Error(c, 500, "清理失败: "+err.Error())
 		return

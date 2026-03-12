@@ -16,7 +16,7 @@ cd ..
 # 复制到后端
 echo "[2/2] 复制到后端dist目录..."
 mkdir -p backend/dist
-cp -r frontend/dist/* backend/dist/
+cp -r frontend-v2/dist/* backend/dist/
 
 echo ""
 echo "✅ 构建完成!"

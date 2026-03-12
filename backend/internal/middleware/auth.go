@@ -34,12 +34,12 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-	c.Set("userID", claims.UserID)
-	c.Set("studentID", claims.StudentID)
-	c.Set("role", claims.Role)
-	c.Set("department", claims.Department)
-	c.Set("deptRole", claims.DeptRole)
-	c.Next()
+		c.Set("userID", claims.UserID)
+		c.Set("studentID", claims.StudentID)
+		c.Set("role", claims.Role)
+		c.Set("department", claims.Department)
+		c.Set("deptRole", claims.DeptRole)
+		c.Next()
 	}
 }
 
@@ -78,13 +78,13 @@ func RequireAuthAndPermission(perm auth.Permission) gin.HandlerFunc {
 			return
 		}
 
-	c.Set("userID", claims.UserID)
-	c.Set("studentID", claims.StudentID)
-	c.Set("role", claims.Role)
-	c.Set("department", claims.Department)
-	c.Set("deptRole", claims.DeptRole)
+		c.Set("userID", claims.UserID)
+		c.Set("studentID", claims.StudentID)
+		c.Set("role", claims.Role)
+		c.Set("department", claims.Department)
+		c.Set("deptRole", claims.DeptRole)
 
-	// 再检查权限
+		// 再检查权限
 		checker := auth.NewChecker(claims.UserID, claims.StudentID, claims.Role, claims.Department, claims.DeptRole)
 		if !checker.HasPermission(perm) {
 			c.JSON(http.StatusForbidden, model.Response{

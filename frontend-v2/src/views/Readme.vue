@@ -57,13 +57,15 @@
         <p class="path-tip">访问路径：<router-link to="/admin/users">用户管理</router-link>（需权限）</p>
         
         <h4 id="temp-permission">6. 临时权限管理</h4>
-        <p>授予用户临时的额外管理权限。</p>
+        <p>支持权限申请审批流程，普通用户可申请临时管理权限。</p>
         <ul>
-          <li><strong>授予权限</strong>：选择用户、权限类型、资源范围、有效期</li>
+          <li><strong>申请权限</strong>：普通用户选择需要的权限类型，填写申请原因提交</li>
+          <li><strong>审批申请</strong>：部门管理员在「待我审批」中审批权限申请</li>
+          <li><strong>授予权限</strong>：管理员可直接授予用户临时权限</li>
           <li><strong>撤销权限</strong>：手动撤销已授予的权限</li>
           <li><strong>权限查看</strong>：查看所有临时权限状态，过期提醒</li>
         </ul>
-        <p class="path-tip">访问路径：<router-link to="/admin/temp-permissions">临时权限</router-link>（需系统管理员权限）</p>
+        <p class="path-tip">访问路径：<router-link to="/admin/temp-permissions">权限申请</router-link>（所有用户可访问）</p>
         
         <h4 id="smtp">7. SMTP邮件配置</h4>
         <p>配置邮件服务器用于发送系统通知。</p>
@@ -74,19 +76,19 @@
         
         <h3>🔐 权限说明</h3>
         <el-divider />
-        
+
         <el-descriptions :column="1" border>
           <el-descriptions-item label="普通用户">
-            录入无课表、查看个人值班、查看排班结果
+            录入无课表、查看个人值班、查看排班结果、<router-link to="/admin/temp-permissions">申请临时权限</router-link>
           </el-descriptions-item>
           <el-descriptions-item label="部门管理员">
-            普通用户权限 + <router-link to="/schedule">排班管理</router-link>（仅限本部门）+ <router-link to="/admin/users">用户管理</router-link>（仅限本部门）
+            普通用户权限 + <router-link to="/schedule">排班管理</router-link>（仅限本部门）+ <router-link to="/admin/users">用户管理</router-link>（仅限本部门）+ <router-link to="/admin/temp-permissions">审批权限申请</router-link>
           </el-descriptions-item>
           <el-descriptions-item label="办公室管理员">
             部门管理员权限 + <router-link to="/admin/duty-assignments">每周分工</router-link> + <router-link to="/admin/users">用户管理</router-link>（全部）+ <router-link to="/admin/semester">学期设置</router-link>
           </el-descriptions-item>
           <el-descriptions-item label="系统管理员">
-            全部权限 + <router-link to="/admin/temp-permissions">临时权限管理</router-link> + <router-link to="/admin/smtp">SMTP配置</router-link>
+            全部权限 + <router-link to="/admin/temp-permissions">临时权限管理</router-link> + <router-link to="/admin/smtp">SMTP配置</router-link> + 清理过期权限
           </el-descriptions-item>
         </el-descriptions>
         
@@ -151,13 +153,33 @@
           <li>点击保存设置</li>
         </ol>
         
-        <h4 id="temp-permission-grant">六、授予临时权限</h4>
-        <p>系统管理员可以临时授予用户额外权限：</p>
+        <h4 id="temp-permission-apply">六、申请临时权限</h4>
+        <p>普通用户可以申请临时管理权限：</p>
         <ol>
-          <li>进入<router-link to="/admin/temp-permissions">临时权限</router-link>页面</li>
+          <li>进入<router-link to="/admin/temp-permissions">权限申请</router-link>页面</li>
+          <li>点击"申请权限"按钮</li>
+          <li>选择需要的权限类型（如排班管理、用户管理等）</li>
+          <li>填写申请原因和期望到期日</li>
+          <li>提交申请，等待部门管理员审批</li>
+        </ol>
+
+        <h4 id="temp-permission-approve">七、审批权限申请</h4>
+        <p>部门管理员可以审批成员的权限申请：</p>
+        <ol>
+          <li>进入<router-link to="/admin/temp-permissions">权限申请</router-link>页面</li>
+          <li>切换到"待我审批"标签页</li>
+          <li>查看待审批的申请列表</li>
+          <li>点击"通过"或"拒绝"处理申请</li>
+          <li>审批通过后，申请人自动获得临时权限</li>
+        </ol>
+
+        <h4 id="temp-permission-grant">八、授予临时权限（管理员）</h4>
+        <p>管理员可以直接授予用户临时权限：</p>
+        <ol>
+          <li>进入<router-link to="/admin/temp-permissions">权限申请</router-link>页面</li>
           <li>点击"授予权限"</li>
           <li>选择用户、权限类型、资源范围</li>
-          <li>设置有效期（1小时至7天）</li>
+          <li>设置有效期</li>
           <li>点击确定</li>
         </ol>
         
@@ -183,8 +205,17 @@
         A: 联系部门管理员或办公室管理员，在用户管理中修改。</p>
         
         <p><strong>Q: 临时权限过期了怎么办？</strong><br>
-        A: 需要重新由管理员授予临时权限。</p>
-        
+        A: 可以重新提交权限申请，或联系管理员授予临时权限。</p>
+
+        <p><strong>Q: 如何申请临时权限？</strong><br>
+        A: 进入<router-link to="/admin/temp-permissions">权限申请</router-link>页面，点击"申请权限"按钮，填写申请信息后提交。</p>
+
+        <p><strong>Q: 权限申请多久能审批？</strong><br>
+        A: 取决于您的部门管理员，审批通过后系统会立即授予权限。</p>
+
+        <p><strong>Q: 可以撤销自己提交的申请吗？</strong><br>
+        A: 可以，在"我的申请"中找到待审批的申请，点击"撤销"按钮即可。</p>
+
         <h3>📞 帮助与支持</h3>
         <el-divider />
         <p>如遇问题，请联系：</p>

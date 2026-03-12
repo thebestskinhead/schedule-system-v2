@@ -66,7 +66,7 @@ const routes = [
         path: 'admin/temp-permissions',
         name: 'TempPermission',
         component: () => import('../views/TempPermission.vue'),
-        meta: { requiresSysAdmin: true }
+        meta: { requiresAuth: true }
       },
       {
         path: 'admin/smtp',
@@ -135,8 +135,8 @@ router.beforeEach(async (to, from, next) => {
   // 阻止已安装系统访问 init 页面
   if (to.path === '/init') {
     try {
-      const res = await getInstallStatus()
-      if (res.data?.data?.installed) {
+      const data = await getInstallStatus()
+      if (data?.installed) {
         next('/login')
         return
       }

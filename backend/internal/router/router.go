@@ -6,19 +6,23 @@ import (
 	"path/filepath"
 	"schedule-system-v2/backend/internal/auth"
 	"schedule-system-v2/backend/internal/config"
+	"schedule-system-v2/backend/internal/dao"
 	"schedule-system-v2/backend/internal/handler"
 	"schedule-system-v2/backend/internal/middleware"
+	"schedule-system-v2/backend/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
 func getDistPath() string {
+	// 首先查找本目录下的 dist 或 frontend/dist
 	paths := []string{
-		"frontend/dist",
-		"../../frontend/dist",
-		"../frontend/dist",
 		"./dist",
-		"backend/dist",
+		"./frontend/dist",
+		"./static",
+		"dist",
+		"frontend/dist",
+		"static",
 	}
 	for _, p := range paths {
 		if _, err := os.Stat(p); err == nil {
@@ -46,6 +50,7 @@ func SetupRouter() *gin.Engine {
 		c.Next()
 	})
 
+	// 初始化服务和 Handler
 	systemHandler := handler.NewSystemHandler()
 	userHandler := handler.NewUserHandler()
 	availabilityHandler := handler.NewAvailabilityHandler()
@@ -55,6 +60,23 @@ func SetupRouter() *gin.Engine {
 	weeklyDutyHandler := handler.NewWeeklyDutyHandler()
 	tempPermissionHandler := handler.NewTempPermissionHandler()
 	smtpHandler := handler.NewSMTPHandler()
+
+	// 初始化应用系统相关服务
+	var applicationHandler *handler.ApplicationHandler
+	if config.IsInstalled() {
+		userDao := dao.NewUserDAO()
+		tempPermissionDao := dao.NewTempPermissionDAO()
+		applicationDao := dao.NewApplicationDao()
+
+		appManager := service.NewApplicationManager()
+		applicationService := service.NewApplicationService(applicationDao, userDao, appManager)
+
+		// 注册临权申请执行器
+		tempPermExecutor := service.NewTempPermissionExecutor(userDao, tempPermissionDao, applicationDao)
+		appManager.Register(tempPermExecutor)
+
+		applicationHandler = handler.NewApplicationHandler(applicationService)
+	}
 
 	// 公开API（不需要认证）
 	api := r.Group("/api/v1")
@@ -120,7 +142,7 @@ func SetupRouter() *gin.Engine {
 		admin.PUT("/users/:id", middleware.PermissionMiddleware(auth.PermUserManage), userHandler.AdminUpdateUser)
 		admin.DELETE("/users/:id", middleware.PermissionMiddleware(auth.PermUserManage), userHandler.DeleteUser)
 		admin.POST("/users/role", middleware.PermissionMiddleware(auth.PermUserSetRole), userHandler.SetUserRole)
-		admin.GET("/users/by-dept", middleware.PermissionMiddleware(auth.PermUserManage), userHandler.GetUserListByDepartment)
+		admin.GET("/users/by-dept", middleware.PermissionMiddleware(auth.PermUserManageDept), userHandler.GetUserListByDepartment)
 		admin.PUT("/users/:id/department", middleware.PermissionMiddleware(auth.PermUserManage), userHandler.SetUserDepartment)
 		admin.PUT("/users/:id/dept-role", middleware.PermissionMiddleware(auth.PermUserManage), userHandler.SetUserDeptRole)
 		admin.GET("/users/filter", middleware.PermissionMiddleware(auth.PermUserManage), userHandler.GetUsersByFilter)
@@ -148,10 +170,10 @@ func SetupRouter() *gin.Engine {
 		admin.PUT("/duty-assignments", middleware.PermissionMiddleware(auth.PermSchedulePublish), weeklyDutyHandler.UpdateAssignment)
 		admin.DELETE("/duty-assignments/:id", middleware.PermissionMiddleware(auth.PermSchedulePublish), weeklyDutyHandler.DeleteAssignment)
 
-		// 临时权限管理
-		admin.POST("/temp-permissions", middleware.PermissionMiddleware(auth.PermSystemAdmin), tempPermissionHandler.GrantPermission)
-		admin.GET("/temp-permissions", middleware.PermissionMiddleware(auth.PermSystemAdmin), tempPermissionHandler.GetAllPermissions)
-		admin.DELETE("/temp-permissions/:id", middleware.PermissionMiddleware(auth.PermSystemAdmin), tempPermissionHandler.RevokePermission)
+		// 临时权限管理 - 部门管理员及以上可以管理
+		admin.POST("/temp-permissions", middleware.PermissionMiddleware(auth.PermUserManageDept), tempPermissionHandler.GrantPermission)
+		admin.GET("/temp-permissions", middleware.PermissionMiddleware(auth.PermUserManageDept), tempPermissionHandler.GetAllPermissions)
+		admin.DELETE("/temp-permissions/:id", middleware.PermissionMiddleware(auth.PermUserManageDept), tempPermissionHandler.RevokePermission)
 		admin.POST("/temp-permissions/cleanup", middleware.PermissionMiddleware(auth.PermSystemAdmin), tempPermissionHandler.CleanupExpired)
 
 		// 模板管理
@@ -181,6 +203,26 @@ func SetupRouter() *gin.Engine {
 	// 公开部门列表
 	authGroup.GET("/departments", userHandler.GetDepartments)
 	authGroup.GET("/permissions/list", tempPermissionHandler.GetPermissionList)
+
+	// 应用系统（申请/审批）路由
+	if applicationHandler != nil {
+		// 申请类型
+		authGroup.GET("/application/types", applicationHandler.GetTypes)
+		authGroup.GET("/application/permissions/available", applicationHandler.GetAvailablePermissions)
+
+		// 我的申请
+		authGroup.GET("/applications/my", applicationHandler.GetMyApplications)
+		authGroup.POST("/applications", applicationHandler.Create)
+		authGroup.GET("/applications/:id", applicationHandler.GetDetail)
+		authGroup.POST("/applications/:id/cancel", applicationHandler.Cancel)
+
+		// 待我审批
+		authGroup.GET("/applications/pending", applicationHandler.GetPendingApprovals)
+		authGroup.POST("/applications/:id/approve", applicationHandler.ProcessApproval)
+
+		// 申请统计
+		authGroup.GET("/applications/stats", applicationHandler.GetStats)
+	}
 
 	// 静态文件服务
 	distPath := getDistPath()

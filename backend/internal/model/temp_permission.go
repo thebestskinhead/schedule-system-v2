@@ -2,14 +2,24 @@ package model
 
 import "time"
 
-// GrantPermissionRequest 授权请求
+// GrantPermissionRequest 批量授权请求
 type GrantPermissionRequest struct {
-	UserID       int        `json:"user_id" binding:"required"`
+	UserIDs      []int      `json:"user_ids" binding:"required,min=1"`
 	Permission   Permission `json:"permission" binding:"required"`
 	ResourceType string     `json:"resource_type" binding:"required,oneof=all dept user"`
 	ResourceID   int        `json:"resource_id"`
 	ExpiresAt    time.Time  `json:"expires_at" binding:"required"`
 	Reason       string     `json:"reason"`
+}
+
+// SingleGrantRequest 单个授权请求（内部使用）
+type SingleGrantRequest struct {
+	UserID       int
+	Permission   Permission
+	ResourceType string
+	ResourceID   int
+	ExpiresAt    time.Time
+	Reason       string
 }
 
 // RevokePermissionRequest 撤销权限请求
@@ -94,10 +104,28 @@ func GetPermissionList() []PermissionInfo {
 
 // GetPermissionName 获取权限名称
 func GetPermissionName(perm Permission) string {
+	// 首先检查 GetPermissionList 中的权限
 	for _, info := range GetPermissionList() {
 		if info.Code == string(perm) {
 			return info.Name
 		}
 	}
+	
+	// 支持下划线格式的权限名称（用于临时权限申请）
+	switch string(perm) {
+	case "duty_manage":
+		return "值班管理"
+	case "user_manage":
+		return "用户管理"
+	case "schedule_manage":
+		return "排班管理"
+	case "crawler_manage":
+		return "爬虫管理"
+	case "system_manage":
+		return "系统管理"
+	case "temp_permission_grant":
+		return "授权管理"
+	}
+	
 	return string(perm)
 }

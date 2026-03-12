@@ -87,6 +87,7 @@ const mainNavItems = computed(() => [
   { path: '/availability', name: '无课表', icon: 'Calendar' },
   { path: '/duty/my', name: '我的值班', icon: 'Timer' },
   { path: '/schedule/result', name: '排班结果', icon: 'View' },
+  { path: '/admin/temp-permissions', name: '权限申请', icon: 'Key' },
   { path: '/readme', name: '使用说明', icon: 'Document' }
 ])
 
@@ -102,7 +103,6 @@ const manageNavItems = computed(() => {
     items.push({ path: '/admin/semester', name: '学期设置', icon: 'Date' })
   }
   if (userStore.isAdmin) {
-    items.push({ path: '/admin/temp-permissions', name: '临时权限', icon: 'Key' })
     items.push({ path: '/admin/smtp', name: 'SMTP配置', icon: 'Message' })
   }
   return items

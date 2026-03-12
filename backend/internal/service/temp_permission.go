@@ -20,8 +20,8 @@ func NewTempPermissionService() *TempPermissionService {
 	}
 }
 
-// GrantPermission 授予临时权限
-func (s *TempPermissionService) GrantPermission(adminID int, req *model.GrantPermissionRequest) error {
+// GrantPermission 授予临时权限（带权限检查）
+func (s *TempPermissionService) GrantPermission(adminID int, checker *auth.Checker, req *model.SingleGrantRequest) error {
 	// 验证用户是否存在
 	user, err := s.userDAO.GetByID(req.UserID)
 	if err != nil {
@@ -48,6 +48,11 @@ func (s *TempPermissionService) GrantPermission(adminID int, req *model.GrantPer
 		return errors.New("无效的权限代码")
 	}
 
+	// 检查授权人是否有权限授予此权限
+	if !s.canGrantPermission(checker, req.Permission, req.ResourceType) {
+		return errors.New("您没有权限授予此权限")
+	}
+
 	// 创建权限记录
 	perm := &model.UserPermissionTemp{
 		UserID:       req.UserID,
@@ -63,24 +68,86 @@ func (s *TempPermissionService) GrantPermission(adminID int, req *model.GrantPer
 	return s.dao.Create(perm)
 }
 
-// RevokePermission 撤销临时权限
-func (s *TempPermissionService) RevokePermission(adminID int, permID int) error {
+// canGrantPermission 检查授权人是否可以授予指定权限
+func (s *TempPermissionService) canGrantPermission(checker *auth.Checker, perm model.Permission, resourceType string) bool {
+	// 系统管理员可以授予任何权限
+	if checker.IsAdmin() {
+		return true
+	}
+
+	// 部门管理员/办公室管理员只能授予自己拥有的权限
+	switch perm {
+	case auth.PermScheduleManageDept, auth.PermScheduleViewDept:
+		// 排班部门管理权限
+		return checker.HasPermission(auth.PermScheduleManageDept)
+	case auth.PermUserManageDept:
+		// 部门用户管理权限
+		return checker.HasPermission(auth.PermUserManageDept)
+	case auth.PermScheduleViewAll:
+		// 全局排班查看权限
+		return checker.HasPermission(auth.PermScheduleViewAll)
+	case auth.PermUserManageAll:
+		// 全局用户管理权限
+		return checker.IsOfficeAdmin() || checker.IsAdmin()
+	default:
+		return false
+	}
+}
+
+// RevokePermission 撤销临时权限（带权限检查）
+func (s *TempPermissionService) RevokePermission(adminID int, checker *auth.Checker, permID int) error {
 	// 获取权限记录
 	perm, err := s.dao.GetByID(permID)
 	if err != nil {
 		return errors.New("权限记录不存在")
 	}
 
-	// 只有授权人或系统管理员可以撤销
-	if perm.GrantedBy != adminID {
-		// 检查是否是系统管理员
-		admin, err := s.userDAO.GetByID(adminID)
-		if err != nil || admin.Role != model.RoleAdmin {
-			return errors.New("无权限撤销此授权")
+	// 系统管理员可以撤销任何权限
+	if checker.IsAdmin() {
+		return s.dao.Revoke(permID)
+	}
+
+	// 办公室管理员可以撤销任何权限
+	if checker.IsOfficeAdmin() {
+		return s.dao.Revoke(permID)
+	}
+
+	// 部门管理员只能撤销自己授予的，或本部门的权限
+	if perm.GrantedBy == adminID {
+		return s.dao.Revoke(permID)
+	}
+
+	// 检查被授权人是否在自己部门
+	user, err := s.userDAO.GetByID(perm.UserID)
+	if err != nil {
+		return errors.New("用户不存在")
+	}
+	if user.Department == checker.GetDepartment() {
+		return s.dao.Revoke(permID)
+	}
+
+	return errors.New("无权限撤销此授权")
+}
+
+// GetPermissionsByDepartment 按部门获取权限
+func (s *TempPermissionService) GetPermissionsByDepartment(dept string) ([]model.TempPermissionView, error) {
+	// 获取所有权限
+	allPerms, err := s.dao.GetAllActive()
+	if err != nil {
+		return nil, err
+	}
+
+	// 筛选出部门相关的权限
+	var filtered []model.UserPermissionTemp
+	for _, perm := range allPerms {
+		// 获取用户信息
+		user, _ := s.userDAO.GetByID(perm.UserID)
+		if user != nil && user.Department == dept {
+			filtered = append(filtered, perm)
 		}
 	}
 
-	return s.dao.Revoke(permID)
+	return s.convertToView(filtered)
 }
 
 // GetUserTempPermissions 获取用户的临时权限

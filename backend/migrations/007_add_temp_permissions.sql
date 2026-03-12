@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS user_permissions_temp (
     granted_by INT NOT NULL COMMENT '授权人ID',
     reason VARCHAR(255) COMMENT '授权原因',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP NOT NULL COMMENT '过期时间',
+    expires_at TIMESTAMP DEFAULT '2099-12-31 23:59:59' COMMENT '过期时间',
     is_active BOOLEAN DEFAULT TRUE COMMENT '是否有效',
     INDEX idx_user_id (user_id),
     INDEX idx_expires_at (expires_at),

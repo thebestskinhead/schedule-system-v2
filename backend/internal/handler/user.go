@@ -160,9 +160,9 @@ func (h *UserHandler) SetUserRole(c *gin.Context) {
 
 // GetUserListByDepartment 按部门获取用户列表
 func (h *UserHandler) GetUserListByDepartment(c *gin.Context) {
-	// 权限检查 - 需要用户管理权限
+	// 权限检查 - 需要部门用户管理权限或用户管理权限
 	checker := auth.GetChecker(c)
-	if !checker.HasPermission(auth.PermUserManage) {
+	if !checker.HasPermission(auth.PermUserManageDept) && !checker.HasPermission(auth.PermUserManage) {
 		auth.ResponseForbidden(c)
 		return
 	}
