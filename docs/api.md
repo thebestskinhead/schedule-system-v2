@@ -467,14 +467,14 @@ Authorization: Bearer <token>
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| user_id | int | 是 | 用户ID |
+| user_ids | []int | 是 | 用户ID数组（支持批量） |
 | permission | string | 是 | 权限代码 |
 | resource_type | string | 是 | `all`/`dept`/`user` |
 | resource_id | int | 否 | 资源ID |
 | expires_at | datetime | 是 | 过期时间 |
 | reason | string | 否 | 授权原因 |
 
-**权限要求:** 系统管理员
+**权限要求:** `user:manage:dept`
 
 ### 3. 获取我的临时权限
 
@@ -500,6 +500,230 @@ Authorization: Bearer <token>
       "days_left": 30
     }
   ]
+}
+```
+
+### 4. 获取所有临时权限（管理员）
+
+```http
+GET /admin/temp-permissions
+Authorization: Bearer <token>
+```
+
+**响应示例:**
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "id": 1,
+      "user_id": 2,
+      "user_name": "张三",
+      "permission": "schedule:manage:dept",
+      "permission_name": "排班管理(部门)",
+      "granted_by_name": "管理员",
+      "expires_at": "2024-12-31T23:59:59Z",
+      "is_expired": false
+    }
+  ]
+}
+```
+
+**权限要求:** `user:manage:dept`
+
+### 5. 撤销临时权限
+
+```http
+DELETE /admin/temp-permissions/:id
+Authorization: Bearer <token>
+```
+
+**权限要求:** `user:manage:dept`
+
+---
+
+## 权限申请系统
+
+### 1. 获取可申请权限列表
+
+```http
+GET /application/permissions/available
+Authorization: Bearer <token>
+```
+
+**响应示例:**
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "key": "duty_manage",
+      "name": "值班管理",
+      "description": "管理值班安排和记录"
+    },
+    {
+      "key": "schedule_manage",
+      "name": "排班管理",
+      "description": "创建和修改排班"
+    }
+  ]
+}
+```
+
+### 2. 创建权限申请
+
+```http
+POST /applications
+Authorization: Bearer <token>
+```
+
+**请求参数:**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| type | string | 是 | 申请类型：`temp_permission` |
+| data | object | 是 | 申请数据 |
+| data.permission | string | 是 | 申请的权限代码 |
+| data.expiry_date | datetime | 是 | 期望到期时间 |
+| data.reason | string | 是 | 申请原因 |
+| reason | string | 是 | 申请说明 |
+
+**请求示例:**
+
+```json
+{
+  "type": "temp_permission",
+  "data": {
+    "permission": "schedule_manage",
+    "expiry_date": "2024-12-31T23:59:59Z",
+    "reason": "因部门活动需要临时管理权限"
+  },
+  "reason": "申请临时排班管理权限"
+}
+```
+
+**权限要求:** 登录用户
+
+### 3. 获取我的申请列表
+
+```http
+GET /applications/my?page=1&page_size=10
+Authorization: Bearer <token>
+```
+
+**响应示例:**
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "list": [
+      {
+        "id": 1,
+        "application_no": "APP202403120001",
+        "type_code": "temp_permission",
+        "status": 0,
+        "content": "申请临时排班管理权限",
+        "created_at": "2024-03-12T10:00:00Z"
+      }
+    ],
+    "total": 1
+  }
+}
+```
+
+### 4. 获取待审批列表
+
+```http
+GET /applications/pending?page=1&page_size=10
+Authorization: Bearer <token>
+```
+
+**响应示例:**
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "list": [
+      {
+        "id": 1,
+        "application_no": "APP202403120001",
+        "applicant_name": "张三",
+        "department": "竞赛部",
+        "type_code": "temp_permission",
+        "content": "申请临时排班管理权限",
+        "created_at": "2024-03-12T10:00:00Z"
+      }
+    ],
+    "total": 1
+  }
+}
+```
+
+**权限要求:** `user:manage:dept`
+
+### 5. 处理审批
+
+```http
+POST /applications/:id/approve
+Authorization: Bearer <token>
+```
+
+**请求参数:**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| action | string | 是 | `approve` 或 `reject` |
+| comment | string | 否 | 审批意见 |
+
+**请求示例:**
+
+```json
+{
+  "action": "approve",
+  "comment": "同意申请，请合理使用权限"
+}
+```
+
+**权限要求:** `user:manage:dept`
+
+### 6. 取消申请
+
+```http
+POST /applications/:id/cancel
+Authorization: Bearer <token>
+```
+
+**说明:** 只能取消自己提交的待审批申请
+
+### 7. 获取申请统计
+
+```http
+GET /applications/stats
+Authorization: Bearer <token>
+```
+
+**响应示例:**
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "my_applications": {
+      "pending": 2,
+      "approved": 5,
+      "rejected": 1
+    },
+    "pending_approval": 3
+  }
 }
 ```
 
