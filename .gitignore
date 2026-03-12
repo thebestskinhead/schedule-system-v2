@@ -1,0 +1,73 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go vendor directory
+vendor/
+
+# Node modules
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Environment variables
+.env
+.env.local
+
+# Database
+*.db
+*.sqlite
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Backend compiled binaries
+backend/server
+backend/main
+backend/*.exe
+
+# Frontend build
+frontend/dist/
+frontend-v2/dist/
+backend/static/assets/
+backend/static/index.html
+
+# Data exports
+v1-data/*.zip
+
+# Large files
+*.tar.gz
+*.zip
+*.rar
+
+# Windows release
+windows-release/
+*.zip

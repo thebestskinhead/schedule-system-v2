@@ -1,0 +1,16 @@
+server:
+    port: "8080"
+    mode: release
+database:
+    host: localhost
+    port: "3306"
+    user: root
+    password: Schedule@2024
+    dbname: schedule_system_v2
+    charset: utf8mb4
+jwt:
+    secret: schedule-system-secret-key
+    expire: 168
+site:
+    domain: https://ba0ef1631b5b4535bd920b7a7ea3db0b--8080.ap-shanghai2.cloudstudio.club/
+installed: true
