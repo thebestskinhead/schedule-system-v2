@@ -71,3 +71,4 @@ v1-data/*.zip
 # Windows release
 windows-release/
 *.zip
+1.py

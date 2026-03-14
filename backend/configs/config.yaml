@@ -2,11 +2,11 @@ server:
     port: "8080"
     mode: release
 database:
-    host: localhost
+    host: rm-bp18v50636683o025go.mysql.rds.aliyuncs.com
     port: "3306"
-    user: root
-    password: Schedule@2024
-    dbname: schedule_system_v2
+    user: schedule_system_v3
+    password: HsGy3e2T3X4zhNk8JC45ePTb5HrrWda7
+    dbname: schedule_system_v3
     charset: utf8mb4
 jwt:
     secret: schedule-system-secret-key
