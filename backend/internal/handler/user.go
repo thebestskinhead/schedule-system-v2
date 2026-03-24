@@ -134,10 +134,32 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	utils.Success(c, nil)
 }
 
+// ChangePassword 修改密码
+func (h *UserHandler) ChangePassword(c *gin.Context) {
+	userID := auth.GetUserIDFromContext(c)
+	if userID == 0 {
+		auth.ResponseUnauthorized(c)
+		return
+	}
+
+	var req struct {
+		OldPassword string `json:"old_password" binding:"required"`
+		NewPassword string `json:"new_password" binding:"required,min=6"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.Error(c, 400, "参数错误: "+err.Error())
+		return
+	}
+
+	if err := h.service.ChangePassword(userID, req.OldPassword, req.NewPassword); err != nil {
+		utils.Error(c, 400, err.Error())
+		return
+	}
+	utils.Success(c, gin.H{"message": "密码修改成功"})
+}
+
 func (h *UserHandler) SetUserRole(c *gin.Context) {
 	// 使用新的权限检查工具 - 检查是否有设置角色权限
-	// 方式1: 使用中间件已经检查过权限，这里直接执行业务逻辑
-	// 方式2: 在handler中再次检查（双重保险）
 	checker := auth.GetChecker(c)
 	if !checker.HasPermission(auth.PermUserSetRole) {
 		auth.ResponseForbidden(c, "无权设置用户角色")
@@ -145,13 +167,24 @@ func (h *UserHandler) SetUserRole(c *gin.Context) {
 	}
 
 	adminID := auth.GetUserIDFromContext(c)
-	var req model.SetRoleRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.Error(c, 400, "参数错误")
+
+	// 从路径参数获取用户ID
+	idStr := c.Param("id")
+	userID, err := strconv.Atoi(idStr)
+	if err != nil {
+		utils.Error(c, 400, "无效的用户ID")
 		return
 	}
 
-	if err := h.service.SetUserRole(adminID, req.UserID, req.Role); err != nil {
+	var req struct {
+		Role string `json:"role" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.Error(c, 400, "参数错误: "+err.Error())
+		return
+	}
+
+	if err := h.service.SetUserRole(adminID, userID, req.Role); err != nil {
 		utils.Error(c, 403, err.Error())
 		return
 	}
@@ -444,7 +477,12 @@ func (h *UserHandler) AdminUpdateUser(c *gin.Context) {
 	utils.Success(c, nil)
 }
 
-// DeleteUser 管理员删除用户
+// DeleteUser 管理员删除用户（实际为禁用用户）
+//
+// 注意：此操作将用户标记为禁用（is_active = 0），而非物理删除。
+// 保留用户数据是为了维护历史值班记录、审批记录等数据的完整性，
+// 确保可以追溯"谁排的班"、"谁值的班"、"谁审批的"等操作历史。
+// 已禁用的用户无法登录系统，也不会出现在用户列表中。
 func (h *UserHandler) DeleteUser(c *gin.Context) {
 	// 权限检查
 	checker := auth.GetChecker(c)

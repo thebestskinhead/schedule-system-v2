@@ -89,6 +89,17 @@ func (d *UserDAO) UpdatePassword(id int, password string) error {
 	return err
 }
 
+// Delete 将用户标记为禁用（is_active = 0），而非物理删除
+//
+// 设计说明：
+// 1. 历史数据完整性：用户关联的值班记录(duty_records)、审批记录(application_approvers)等
+//    需要保留操作者信息，物理删除会导致历史记录变成"匿名操作"
+// 2. 审计需求：排班系统需要追溯谁排的班、谁值的班、谁审批的申请
+// 3. 外键约束：duty_records.assigned_by、applications.applicant_id 等字段依赖 users 表
+// 4. 学号唯一性：student_id 有唯一约束，物理删除后该学号无法重新注册（若人员重新加入）
+//
+// 注意：这实际上是"禁用用户"而非真正的删除，已禁用用户的数据仍保留在数据库中
+// 如需彻底清理数据，需要额外实现归档逻辑
 func (d *UserDAO) Delete(id int) error {
 	query := `UPDATE users SET is_active = 0 WHERE id = ?`
 	_, err := db.GetDB().Exec(query, id)

@@ -20,26 +20,14 @@
             <el-tag :type="getStatusType(row.status)">{{ getStatusText(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="220">
-          <template #default="{ row }">
+        <el-table-column label="操作" width="120">
+          <template #default>
             <el-button 
-              v-if="row.status === 'pending'" 
-              type="success" 
+              type="info" 
               size="small"
-              @click="updateStatus(row, 'confirmed')"
-            >确认</el-button>
-            <el-button 
-              v-if="row.status === 'confirmed'" 
-              type="primary" 
-              size="small"
-              @click="updateStatus(row, 'completed')"
-            >完成</el-button>
-            <el-button 
-              v-if="row.status !== 'cancelled'" 
-              type="danger" 
-              size="small"
-              @click="updateStatus(row, 'cancelled')"
-            >请假</el-button>
+              plain
+              @click="showDeveloping"
+            >操作</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -73,11 +61,19 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import { getMyDuties, updateDutyStatus } from '../api/schedule'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { getMyDuties } from '../api/schedule'
 
 const loading = ref(false)
 const dutyList = ref([])
+
+const showDeveloping = () => {
+  ElMessageBox.alert(
+    '确认值班、请假等功能正在开发中，敬请期待。',
+    '功能开发中',
+    { type: 'info', confirmButtonText: '我知道了' }
+  )
+}
 
 const getStatusType = (status) => {
   const map = { pending: 'info', confirmed: 'success', completed: 'primary', cancelled: 'danger' }
@@ -96,16 +92,6 @@ const fetchData = async () => {
     dutyList.value = data || []
   } finally {
     loading.value = false
-  }
-}
-
-const updateStatus = async (row, status) => {
-  try {
-    await updateDutyStatus({ duty_id: row.id, status })
-    ElMessage.success('状态更新成功')
-    fetchData()
-  } catch {
-    // 错误已在拦截器处理
   }
 }
 

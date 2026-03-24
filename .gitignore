@@ -40,6 +40,11 @@ logs/
 .env
 .env.local
 
+# Config files with sensitive info (use config.example.yaml instead)
+backend/configs/config.yaml
+backend/configs/*.yaml
+!backend/configs/config.example.yaml
+
 # Database
 *.db
 *.sqlite

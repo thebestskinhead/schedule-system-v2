@@ -110,6 +110,7 @@ func SetupRouter() *gin.Engine {
 		// 用户个人信息（普通用户权限）
 		authGroup.GET("/user/profile", middleware.PermissionMiddleware(auth.PermUserProfile), userHandler.GetProfile)
 		authGroup.PUT("/user/profile", middleware.PermissionMiddleware(auth.PermUserProfile), userHandler.UpdateProfile)
+		authGroup.POST("/user/change-password", middleware.PermissionMiddleware(auth.PermUserProfile), userHandler.ChangePassword)
 
 		// 无课表相关（普通用户权限）
 		authGroup.POST("/availability", middleware.PermissionMiddleware(auth.PermAvailabilityEdit), availabilityHandler.AddAvailability)
@@ -141,7 +142,7 @@ func SetupRouter() *gin.Engine {
 		admin.POST("/users", middleware.PermissionMiddleware(auth.PermUserManage), userHandler.CreateUser)
 		admin.PUT("/users/:id", middleware.PermissionMiddleware(auth.PermUserManage), userHandler.AdminUpdateUser)
 		admin.DELETE("/users/:id", middleware.PermissionMiddleware(auth.PermUserManage), userHandler.DeleteUser)
-		admin.POST("/users/role", middleware.PermissionMiddleware(auth.PermUserSetRole), userHandler.SetUserRole)
+		admin.PUT("/users/:id/role", middleware.PermissionMiddleware(auth.PermUserSetRole), userHandler.SetUserRole)
 		admin.GET("/users/by-dept", middleware.PermissionMiddleware(auth.PermUserManageDept), userHandler.GetUserListByDepartment)
 		admin.PUT("/users/:id/department", middleware.PermissionMiddleware(auth.PermUserManage), userHandler.SetUserDepartment)
 		admin.PUT("/users/:id/dept-role", middleware.PermissionMiddleware(auth.PermUserManage), userHandler.SetUserDeptRole)

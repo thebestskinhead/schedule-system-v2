@@ -57,11 +57,11 @@ const getStatusType = (status) => {
 const loadSchedule = async () => {
   loading.value = true
   try {
-    const res = await getSchedule({ week: selectedWeek.value })
-    if (res && res.code === 200) {
+    const data = await getSchedule({ week: selectedWeek.value })
+    if (data) {
       // 按时段分组
       const groups = {}
-      res.data?.forEach(record => {
+      data.forEach(record => {
         const key = `${record.weekday}-${record.period}`
         if (!groups[key]) {
           groups[key] = {
@@ -85,8 +85,8 @@ const loadSchedule = async () => {
 onMounted(async () => {
   try {
     const res = await getCurrentWeek()
-    // 后端返回的数据在 data 字段中
-    selectedWeek.value = res?.data?.current_week || res?.current_week || 1
+    // 拦截器已提取 data，直接访问
+    selectedWeek.value = res?.current_week || 1
     loadSchedule()
   } catch {
     loadSchedule()

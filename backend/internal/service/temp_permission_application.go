@@ -49,14 +49,13 @@ func (e *TempPermissionExecutor) Validate(data json.RawMessage) error {
 		return fmt.Errorf("权限标识不能为空")
 	}
 
-	// 检查权限是否有效
+	// 检查权限是否有效 - 使用冒号格式与系统权限保持一致
 	validPermissions := []string{
-		"duty_manage",
-		"user_manage",
-		"schedule_manage",
-		"crawler_manage",
-		"system_manage",
-		"temp_permission_grant",
+		"schedule:publish",
+		"schedule:manage:all",
+		"user:manage:all",
+		"schedule:manage:dept",
+		"user:manage:dept",
 	}
 	found := false
 	for _, perm := range validPermissions {
@@ -205,13 +204,13 @@ func (e *TempPermissionExecutor) CanApply(ctx context.Context, userID int, data 
 
 // GetAvailablePermissions 获取用户可申请的所有权限
 func GetAvailablePermissions(user *model.User) []map[string]string {
+	// 统一使用冒号格式与系统权限保持一致
 	allPermissions := []map[string]string{
-		{"key": "duty_manage", "name": "值班管理", "description": "管理值班安排和记录"},
-		{"key": "user_manage", "name": "用户管理", "description": "管理用户信息"},
-		{"key": "schedule_manage", "name": "排班管理", "description": "创建和修改排班"},
-		{"key": "crawler_manage", "name": "爬虫管理", "description": "管理课程导入爬虫"},
-		{"key": "system_manage", "name": "系统管理", "description": "系统配置管理"},
-		{"key": "temp_permission_grant", "name": "授权管理", "description": "授予他人临时权限"},
+		{"key": "schedule:publish", "name": "设置每周分工", "description": "设置各部门在本周值班的日期安排"},
+		{"key": "schedule:manage:all", "name": "排班管理（全部）", "description": "管理所有部门的排班"},
+		{"key": "user:manage:all", "name": "用户管理（全部）", "description": "管理所有用户"},
+		{"key": "schedule:manage:dept", "name": "排班管理（部门）", "description": "管理部门内排班"},
+		{"key": "user:manage:dept", "name": "用户管理（部门）", "description": "管理部门内用户"},
 	}
 
 	// 根据用户角色过滤已拥有的权限
@@ -221,9 +220,9 @@ func GetAvailablePermissions(user *model.User) []map[string]string {
 		if user.Role == "admin" {
 			hasPerm = true
 		} else if user.DeptRole == "dept_admin" {
-			// 部门管理员默认拥有大部分权限
+			// 部门管理员默认拥有部门级权限
 			switch perm["key"] {
-			case "duty_manage", "schedule_manage", "crawler_manage", "temp_permission_grant":
+			case "schedule:manage:dept", "user:manage:dept", "schedule:publish":
 				hasPerm = true
 			}
 		}

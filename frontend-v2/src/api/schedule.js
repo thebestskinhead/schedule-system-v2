@@ -25,6 +25,8 @@ export const deleteTemplate = (id) => request.delete(`/admin/templates/${id}`)
 // 分工配置
 export const getDutyAssignments = (params) => request.get('/admin/duty-assignments', { params })
 export const saveDutyAssignments = (data) => request.post('/admin/duty-assignments', data)
+export const updateDutyAssignment = (id, data) => request.put('/admin/duty-assignments', { id, ...data })
+export const deleteDutyAssignment = (id) => request.delete(`/admin/duty-assignments/${id}`)
 export const getMyDeptAssignment = (params) => request.get('/duty-assignments/my-dept', { params })
 
 // 学期起始日设置

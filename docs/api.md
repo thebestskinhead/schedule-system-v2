@@ -8,6 +8,44 @@
 - **认证方式**: JWT Token (Bearer Token)
 - **Content-Type**: `application/json`
 
+## 权限代码说明
+
+### 可授权的临时权限
+
+系统使用冒号格式的权限代码 (`category:action:scope`)：
+
+| 权限代码 | 名称 | 说明 | 适用范围 |
+|----------|------|------|----------|
+| `schedule:publish` | 设置每周分工 | 设置各部门本周值班日期 | 全局 |
+| `schedule:manage:all` | 排班管理（全部）| 管理所有部门排班 | 全部部门 |
+| `user:manage:all` | 用户管理（全部）| 管理所有用户 | 全部部门 |
+| `schedule:manage:dept` | 排班管理（部门）| 管理本部门排班 | 本部门 |
+| `user:manage:dept` | 用户管理（部门）| 管理本部门成员 | 本部门 |
+
+**注意**: 已废弃的下划线格式（如 `duty_manage`, `schedule_manage`）不再使用。
+
+### 响应格式
+
+统一响应结构：
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": { ... }
+}
+```
+
+错误响应：
+
+```json
+{
+  "code": 400,
+  "message": "错误信息",
+  "data": null
+}
+```
+
 ## 认证相关
 
 ### 1. 用户注册

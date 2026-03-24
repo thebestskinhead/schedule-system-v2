@@ -77,7 +77,8 @@ func (s *WeeklyDutyService) GetDeptAssignment(week int, dept string) ([]model.We
 func (s *WeeklyDutyService) GetMyDeptAssignment(week int, dept string) (*model.MyDeptAssignment, error) {
 	assignments, err := s.dao.GetByWeekAndDept(week, dept)
 	if err != nil {
-		return nil, err
+		// 没有数据时返回空结果而不是错误
+		assignments = []model.WeeklyDutyAssignment{}
 	}
 
 	result := &model.MyDeptAssignment{

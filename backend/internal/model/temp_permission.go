@@ -104,28 +104,13 @@ func GetPermissionList() []PermissionInfo {
 
 // GetPermissionName 获取权限名称
 func GetPermissionName(perm Permission) string {
-	// 首先检查 GetPermissionList 中的权限
+	// 检查 GetPermissionList 中的权限
 	for _, info := range GetPermissionList() {
 		if info.Code == string(perm) {
 			return info.Name
 		}
 	}
 	
-	// 支持下划线格式的权限名称（用于临时权限申请）
-	switch string(perm) {
-	case "duty_manage":
-		return "值班管理"
-	case "user_manage":
-		return "用户管理"
-	case "schedule_manage":
-		return "排班管理"
-	case "crawler_manage":
-		return "爬虫管理"
-	case "system_manage":
-		return "系统管理"
-	case "temp_permission_grant":
-		return "授权管理"
-	}
-	
+	// 未找到则返回原始代码
 	return string(perm)
 }

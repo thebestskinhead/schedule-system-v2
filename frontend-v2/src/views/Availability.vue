@@ -286,8 +286,8 @@ const currentWeek = ref(1)
 const fetchCurrentWeek = async () => {
   try {
     const res = await getCurrentWeek()
-    // 后端返回的数据在 data 字段中
-    const week = res?.data?.current_week || res?.current_week
+    // 拦截器已提取 data，直接访问
+    const week = res?.current_week
     if (week) {
       currentWeek.value = week
     }

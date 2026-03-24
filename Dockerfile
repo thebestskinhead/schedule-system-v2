@@ -2,10 +2,10 @@
 FROM node:20-alpine AS frontend-builder
 
 WORKDIR /app/frontend
-COPY frontend/package*.json ./
+COPY frontend-v2/package*.json ./
 RUN npm install
 
-COPY frontend/ ./
+COPY frontend-v2/ ./
 RUN npm run build
 
 # 多阶段构建 - 后端

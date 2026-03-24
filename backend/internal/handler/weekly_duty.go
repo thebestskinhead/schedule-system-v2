@@ -67,7 +67,10 @@ func (h *WeeklyDutyHandler) GetAssignments(c *gin.Context) {
 		return
 	}
 
-	utils.Success(c, assignments)
+	// 统一返回格式，包装在 assignments 字段中
+	utils.Success(c, gin.H{
+		"assignments": assignments,
+	})
 }
 
 // GetAssignmentView 获取分工视图（按部门聚合）

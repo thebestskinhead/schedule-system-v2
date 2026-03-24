@@ -42,15 +42,14 @@
     </div>
 
     <!-- 本周分工 -->
-    <div class="card" v-if="myDeptAssignment">
+    <div class="card" v-if="userStore.user?.department">
       <div class="card-header">
         <span class="card-title">第{{ form.week }}周 {{ userStore.user?.department }} 分工安排</span>
-        <el-tag v-if="myDeptAssignment.days?.length" type="success">已分配</el-tag>
+        <el-tag v-if="assignmentDays.length" type="success">已分配</el-tag>
         <el-tag v-else type="warning">未分配</el-tag>
       </div>
-      <div v-if="myDeptAssignment.days?.length" class="assignment-info">
-        <p><strong>值班日期：</strong>周{{ myDeptAssignment.days.map(d => ['一','二','三','四','五'][d-1]).join('、') }}</p>
-        <p><strong>任务分配：</strong>{{ myDeptAssignment.task || '暂无任务说明' }}</p>
+      <div v-if="assignmentDays.length" class="assignment-info">
+        <p><strong>值班日期：</strong>周{{ assignmentDays.map(d => ['一','二','三','四','五'][d-1]).join('、') }}</p>
         <el-button type="primary" size="small" @click="applyAssignmentDays">
           <el-icon><Check /></el-icon> 应用分工日期
         </el-button>
@@ -427,15 +426,19 @@ const form = reactive({
 // 部门分工数据
 const myDeptAssignment = ref(null)
 
+// 从 weekdays 中提取值班的日期
+const assignmentDays = computed(() => {
+  if (!myDeptAssignment.value?.weekdays) return []
+  return myDeptAssignment.value.weekdays
+    .filter(w => w.is_assigned)
+    .map(w => w.weekday)
+})
+
 // 加载部门分工
 const loadMyDeptAssignment = async () => {
   try {
     const data = await getMyDeptAssignment({ week: form.week })
     myDeptAssignment.value = data
-    // 如果有分工日期，默认选中
-    if (data?.days?.length && form.days.length === 5) {
-      // 只在没有手动修改时才自动应用
-    }
   } catch (error) {
     console.error('加载部门分工失败:', error)
     myDeptAssignment.value = null
@@ -444,8 +447,9 @@ const loadMyDeptAssignment = async () => {
 
 // 应用分工日期到排班
 const applyAssignmentDays = () => {
-  if (myDeptAssignment.value?.days?.length) {
-    form.days = [...myDeptAssignment.value.days]
+  const days = assignmentDays.value
+  if (days.length) {
+    form.days = [...days]
     ElMessage.success('已应用分工日期：周' + form.days.map(d => ['一','二','三','四','五'][d-1]).join('、'))
   }
 }
@@ -974,8 +978,8 @@ onMounted(async () => {
   try {
     const res = await getCurrentWeek()
     console.log('Schedule - getCurrentWeek res:', res)
-    // 后端返回的数据在 data 字段中
-    const currentWeek = res?.data?.current_week || res?.current_week
+    // 拦截器已提取 data，直接访问
+    const currentWeek = res?.current_week
     if (currentWeek) {
       form.week = currentWeek
       console.log('Schedule - set form.week to:', form.week)
@@ -983,8 +987,8 @@ onMounted(async () => {
   } catch (e) {
     console.error('获取当前周次失败:', e)
   }
-  // 加载部门分工
-  loadMyDeptAssignment()
+  // 加载部门分工（等待周次设置完成后再加载）
+  await loadMyDeptAssignment()
 })
 </script>
 

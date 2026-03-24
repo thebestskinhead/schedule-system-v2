@@ -305,7 +305,19 @@ func (s *UserService) AdminUpdateUser(adminID, targetUserID int, req *model.Admi
 	return s.userDAO.Update(targetUser)
 }
 
-// AdminDeleteUser 管理员删除用户
+// AdminDeleteUser 管理员删除用户（实际为禁用用户）
+//
+// 设计说明：
+// 本系统采用"软删除"策略，即通过设置 is_active = 0 来标记用户为禁用状态，而非物理删除。
+// 原因如下：
+// 1. 数据完整性：用户可能关联历史值班记录、审批记录等，删除用户会导致这些记录失去关联
+// 2. 审计追溯：需要保留"谁值的班"、"谁排的班"、"谁审批的"等操作历史
+// 3. 恢复能力：误删后可以恢复账号，无需重新录入用户信息和历史数据
+//
+// 如果需要物理删除，需要：
+// - 归档用户关键信息（姓名、学号）到历史表
+// - 处理所有关联数据的外键约束
+// - 或者匿名化处理后删除
 func (s *UserService) AdminDeleteUser(adminID, targetUserID int) error {
 	// 验证管理员权限
 	admin, _ := s.userDAO.GetByID(adminID)
@@ -340,4 +352,25 @@ func (s *UserService) AdminDeleteUser(adminID, targetUserID int) error {
 	}
 
 	return s.userDAO.Delete(targetUserID)
+}
+
+// ChangePassword 修改用户密码
+func (s *UserService) ChangePassword(userID int, oldPassword, newPassword string) error {
+	user, err := s.userDAO.GetByID(userID)
+	if err != nil {
+		return errors.New("用户不存在")
+	}
+
+	// 验证旧密码
+	if !utils.CheckPassword(oldPassword, user.Password) {
+		return errors.New("旧密码错误")
+	}
+
+	// 加密新密码
+	hashedPassword, err := utils.HashPassword(newPassword)
+	if err != nil {
+		return errors.New("密码加密失败")
+	}
+
+	return s.userDAO.UpdatePassword(userID, hashedPassword)
 }

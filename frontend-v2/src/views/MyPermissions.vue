@@ -80,10 +80,11 @@ const userStore = useUserStore()
 const tempPermissions = computed(() => userStore.tempPermissions || [])
 
 const permissionMap = {
-  'schedule:manage:dept': '部门排班管理',
-  'user:manage:dept': '部门用户管理',
-  'schedule:view:all': '全局排班查看',
-  'user:manage:all': '全局用户管理'
+  'schedule:publish': '设置每周分工',
+  'schedule:manage:all': '排班管理（全部）',
+  'user:manage:all': '用户管理（全部）',
+  'schedule:manage:dept': '排班管理（部门）',
+  'user:manage:dept': '用户管理（部门）'
 }
 
 const getPermissionText = (row) => permissionMap[row.permission] || row.permission

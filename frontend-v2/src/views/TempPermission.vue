@@ -438,19 +438,13 @@ const grantRules = {
   expires_at: [{ required: true, message: '请选择到期日期' }]
 }
 
-// 权限映射
+// 权限映射 - 统一使用冒号格式与后端一致
 const permissionMap = {
-  'duty_manage': '值班管理',
-  'user_manage': '用户管理',
-  'schedule_manage': '排班管理',
-  'crawler_manage': '爬虫管理',
-  'system_manage': '系统管理',
-  'temp_permission_grant': '授权管理',
-  'schedule:manage:dept': '部门排班管理',
-  'user:manage:dept': '部门用户管理',
-  'schedule:view:all': '全局排班查看',
-  'user:manage:all': '全局用户管理',
-  'schedule:publish': '设置每周分工'
+  'schedule:publish': '设置每周分工',
+  'schedule:manage:all': '排班管理（全部）',
+  'user:manage:all': '用户管理（全部）',
+  'schedule:manage:dept': '排班管理（部门）',
+  'user:manage:dept': '用户管理（部门）'
 }
 
 const appTypeMap = {
@@ -466,18 +460,19 @@ const statusMap = {
   4: { text: '已撤回', type: 'info' }
 }
 
-// 管理员可授予的权限
+// 管理员可授予的权限 - 与后端 GetPermissionList 保持一致
 const grantablePermissions = computed(() => {
   const perms = [
-    { key: 'duty_manage', name: '值班管理' },
-    { key: 'user_manage', name: '用户管理' },
-    { key: 'schedule_manage', name: '排班管理' },
-    { key: 'crawler_manage', name: '爬虫管理' },
-    { key: 'temp_permission_grant', name: '授权管理' }
+    { key: 'schedule:publish', name: '设置每周分工' },
+    { key: 'schedule:manage:dept', name: '排班管理（部门）' },
+    { key: 'user:manage:dept', name: '用户管理（部门）' }
   ]
   
   if (userStore.canManageAll) {
-    perms.push({ key: 'system_manage', name: '系统管理' })
+    perms.unshift(
+      { key: 'schedule:manage:all', name: '排班管理（全部）' },
+      { key: 'user:manage:all', name: '用户管理（全部）' }
+    )
   }
   
   return perms

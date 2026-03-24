@@ -122,7 +122,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '../stores/user'
-import { getCurrentWeek, updateCurrentWeek } from '../api/schedule'
+import { getCurrentWeek, updateCurrentWeek, getSchedule } from '../api/schedule'
 
 const userStore = useUserStore()
 
@@ -167,16 +167,15 @@ const getCompletionRate = (row) => {
 const loadSchedule = async () => {
   try {
     const weekRes = await getCurrentWeek()
-    // 后端返回的数据在 data 字段中
-    currentWeek.value = weekRes?.data?.current_week || weekRes?.current_week || 1
+    // 拦截器已提取 data，直接访问
+    currentWeek.value = weekRes?.current_week || 1
     
-    const res = await fetch(`/api/v1/schedule?week=${currentWeek.value}`, {
-      headers: { 'Authorization': `Bearer ${userStore.token}` }
-    }).then(r => r.json())
+    // 使用封装的 request，统一响应格式处理
+    const data = await getSchedule({ week: currentWeek.value })
     
-    if (res.code === 200 && res.data) {
+    if (data && data.length > 0) {
       const groups = {}
-      res.data.forEach(record => {
+      data.forEach(record => {
         const key = `${record.weekday}-${record.period}`
         if (!groups[key]) {
           groups[key] = {
@@ -192,6 +191,8 @@ const loadSchedule = async () => {
         if (a.weekday !== b.weekday) return a.weekday - b.weekday
         return a.period - b.period
       })
+    } else {
+      scheduleList.value = []
     }
   } catch (error) {
     console.error('加载排班失败:', error)

@@ -2,13 +2,13 @@ package handler
 
 import (
 	"encoding/json"
-	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"schedule-system-v2/backend/internal/auth"
 	"schedule-system-v2/backend/internal/model"
 	"schedule-system-v2/backend/internal/service"
+	"schedule-system-v2/backend/internal/utils"
 )
 
 type ApplicationHandler struct {
@@ -32,14 +32,14 @@ type CreateApplicationRequest struct {
 func (h *ApplicationHandler) Create(c *gin.Context) {
 	var req CreateApplicationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		utils.Error(c, 400, err.Error())
 		return
 	}
 
 	// 获取当前用户
 	checker := auth.GetChecker(c)
 	if checker == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		utils.Error(c, 401, "未登录")
 		return
 	}
 
@@ -51,18 +51,18 @@ func (h *ApplicationHandler) Create(c *gin.Context) {
 		req.Reason,
 	)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		utils.Error(c, 400, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, model.Success(application))
+	utils.Success(c, application)
 }
 
 // GetMyApplications 获取我的申请列表
 func (h *ApplicationHandler) GetMyApplications(c *gin.Context) {
 	checker := auth.GetChecker(c)
 	if checker == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		utils.Error(c, 401, "未登录")
 		return
 	}
 
@@ -85,22 +85,22 @@ func (h *ApplicationHandler) GetMyApplications(c *gin.Context) {
 		pageSize,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		utils.Error(c, 500, err.Error())
 		return
 	}
 
 	// 将 total 包含在 data 中，统一响应格式
-	c.JSON(http.StatusOK, model.Success(gin.H{
+	utils.Success(c, gin.H{
 		"list":  applications,
 		"total": total,
-	}))
+	})
 }
 
 // GetPendingApprovals 获取待我审批的申请
 func (h *ApplicationHandler) GetPendingApprovals(c *gin.Context) {
 	checker := auth.GetChecker(c)
 	if checker == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		utils.Error(c, 401, "未登录")
 		return
 	}
 
@@ -123,28 +123,28 @@ func (h *ApplicationHandler) GetPendingApprovals(c *gin.Context) {
 		pageSize,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		utils.Error(c, 500, err.Error())
 		return
 	}
 
 	// 将 total 包含在 data 中，统一响应格式
-	c.JSON(http.StatusOK, model.Success(gin.H{
+	utils.Success(c, gin.H{
 		"list":  applications,
 		"total": total,
-	}))
+	})
 }
 
 // GetDetail 获取申请详情
 func (h *ApplicationHandler) GetDetail(c *gin.Context) {
 	checker := auth.GetChecker(c)
 	if checker == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		utils.Error(c, 401, "未登录")
 		return
 	}
 
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的ID"})
+		utils.Error(c, 400, "无效的ID")
 		return
 	}
 
@@ -155,11 +155,11 @@ func (h *ApplicationHandler) GetDetail(c *gin.Context) {
 		checker.IsAdmin(),
 	)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		utils.Error(c, 403, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, model.Success(application))
+	utils.Success(c, application)
 }
 
 // ProcessApprovalRequest 处理审批请求
@@ -172,19 +172,19 @@ type ProcessApprovalRequest struct {
 func (h *ApplicationHandler) ProcessApproval(c *gin.Context) {
 	checker := auth.GetChecker(c)
 	if checker == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		utils.Error(c, 401, "未登录")
 		return
 	}
 
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的ID"})
+		utils.Error(c, 400, "无效的ID")
 		return
 	}
 
 	var req ProcessApprovalRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		utils.Error(c, 400, err.Error())
 		return
 	}
 
@@ -200,7 +200,7 @@ func (h *ApplicationHandler) ProcessApproval(c *gin.Context) {
 	case "comment":
 		action = model.ApprovalActionComment
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的操作类型"})
+		utils.Error(c, 400, "无效的操作类型")
 		return
 	}
 
@@ -211,24 +211,24 @@ func (h *ApplicationHandler) ProcessApproval(c *gin.Context) {
 		action,
 		req.Comment,
 	); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		utils.Error(c, 400, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, model.Response{Code: 200, Message: "审批处理成功"})
+	utils.Success(c, gin.H{"message": "审批处理成功"})
 }
 
 // Cancel 取消申请
 func (h *ApplicationHandler) Cancel(c *gin.Context) {
 	checker := auth.GetChecker(c)
 	if checker == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		utils.Error(c, 401, "未登录")
 		return
 	}
 
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的ID"})
+		utils.Error(c, 400, "无效的ID")
 		return
 	}
 
@@ -237,29 +237,29 @@ func (h *ApplicationHandler) Cancel(c *gin.Context) {
 		id,
 		checker.GetUserID(),
 	); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		utils.Error(c, 400, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, model.Response{Code: 200, Message: "申请已取消"})
+	utils.Success(c, gin.H{"message": "申请已取消"})
 }
 
 // GetTypes 获取申请类型列表
 func (h *ApplicationHandler) GetTypes(c *gin.Context) {
 	types, err := h.applicationService.GetApplicationTypes(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		utils.Error(c, 500, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, model.Success(types))
+	utils.Success(c, types)
 }
 
 // GetStats 获取申请统计
 func (h *ApplicationHandler) GetStats(c *gin.Context) {
 	checker := auth.GetChecker(c)
 	if checker == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		utils.Error(c, 401, "未登录")
 		return
 	}
 
@@ -270,18 +270,18 @@ func (h *ApplicationHandler) GetStats(c *gin.Context) {
 		checker.GetDepartment(),
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		utils.Error(c, 500, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, model.Success(stats))
+	utils.Success(c, stats)
 }
 
 // GetAvailablePermissions 获取可申请的权限列表
 func (h *ApplicationHandler) GetAvailablePermissions(c *gin.Context) {
 	checker := auth.GetChecker(c)
 	if checker == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		utils.Error(c, 401, "未登录")
 		return
 	}
 
@@ -294,5 +294,5 @@ func (h *ApplicationHandler) GetAvailablePermissions(c *gin.Context) {
 	}
 
 	permissions := service.GetAvailablePermissions(user)
-	c.JSON(http.StatusOK, model.Success(permissions))
+	utils.Success(c, permissions)
 }
