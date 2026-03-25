@@ -11,7 +11,7 @@
 
 ```bash
 cd backend
-go run ./cmd/main.go
+go run ./cmd/server/main.go
 ```
 
 访问 http://localhost:8080
@@ -50,16 +50,60 @@ cd release
 
 ## 方式三：Docker部署（推荐容器化部署）
 
+### 一键启动（包含MySQL）
+
 ```bash
-# 一键启动（包含MySQL）
+# 1. 复制环境变量配置（可选，修改密码等）
+cp .env.example .env
+# 编辑 .env 修改 DB_PASSWORD 等配置
+
+# 2. 启动所有服务
 docker-compose up -d
 
-# 或者单独构建镜像
-docker build -t schedule-system .
-docker run -p 8080:8080 schedule-system
+# 3. 查看日志
+docker-compose logs -f app
 ```
 
-访问 http://localhost:8080
+访问 http://localhost:8080 ，首次使用需要完成安装向导。
+
+### 自定义配置
+
+在 `.env` 文件中修改：
+
+```bash
+DB_PASSWORD=your_password    # MySQL root 密码
+DB_NAME=schedule_system_v2  # 数据库名
+DB_PORT=3306                # MySQL 映射端口
+APP_PORT=8080               # 应用映射端口
+```
+
+### 单独构建镜像
+
+```bash
+docker build -t schedule-system .
+docker run -d \
+  -p 8080:8080 \
+  -e DB_HOST=your_mysql_host \
+  -e DB_PASSWORD=your_password \
+  --name schedule-app \
+  schedule-system
+```
+
+### 常用命令
+
+```bash
+# 停止
+docker-compose down
+
+# 停止并清除数据
+docker-compose down -v
+
+# 重新构建（代码更新后）
+docker-compose up -d --build
+
+# 查看状态
+docker-compose ps
+```
 
 ---
 
@@ -67,7 +111,7 @@ docker run -p 8080:8080 schedule-system
 
 ### 前端单独部署
 ```bash
-cd frontend
+cd frontend-v2
 npm run build
 # 将 dist/ 目录部署到Nginx或CDN
 ```
@@ -75,7 +119,7 @@ npm run build
 ### 后端单独部署
 ```bash
 cd backend
-go build -o server ./cmd/main.go
+go build -o server ./cmd/server/main.go
 ./server
 ```
 

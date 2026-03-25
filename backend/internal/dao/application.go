@@ -82,14 +82,14 @@ func (d *ApplicationDao) GetByID(ctx context.Context, id int) (*model.Applicatio
 }
 
 // GetByApplicant 获取申请人的申请列表
-func (d *ApplicationDao) GetByApplicant(ctx context.Context, applicantID int, status string, page, pageSize int) ([]model.Application, int, error) {
+func (d *ApplicationDao) GetByApplicant(ctx context.Context, applicantID int, status int, page, pageSize int) ([]model.Application, int, error) {
 	var conditions []string
 	var args []interface{}
 	
 	conditions = append(conditions, "a.applicant_id = ?")
 	args = append(args, applicantID)
 	
-	if status != "" {
+	if status >= 0 {
 		conditions = append(conditions, "a.status = ?")
 		args = append(args, status)
 	}
@@ -129,13 +129,14 @@ func (d *ApplicationDao) GetPendingByApprover(ctx context.Context, approverID in
 	var conditions []string
 	var args []interface{}
 	
-	conditions = append(conditions, "a.status IN (?, ?)")
-	args = append(args, model.ApplicationStatusPending, model.ApplicationStatusProcessing)
+	conditions = append(conditions, "a.status IN (0, 1)")
 	
 	if !isAdmin && department != "" {
 		// 部门管理员只能看到本部门的
 		conditions = append(conditions, "a.department = ?")
 		args = append(args, department)
+		// 排除全局权限申请（type_code=temp_permission 且 data 中包含 :manage:all）
+		conditions = append(conditions, "(a.type_code != 'temp_permission' OR a.data NOT LIKE '%manage:all%')")
 	}
 	
 	whereClause := "WHERE " + strings.Join(conditions, " AND ")
@@ -249,7 +250,7 @@ func (d *ApplicationDao) GetApproversByType(ctx context.Context, typeCode string
 // ========== 统计操作 ==========
 
 // CountByApplicantAndStatus 统计用户的申请数量
-func (d *ApplicationDao) CountByApplicantAndStatus(ctx context.Context, userID int, status string) (int, error) {
+func (d *ApplicationDao) CountByApplicantAndStatus(ctx context.Context, userID int, status int) (int, error) {
 	query := `SELECT COUNT(*) FROM applications WHERE applicant_id = ? AND status = ?`
 	var count int
 	err := db.GetDB().Get(&count, query, userID, status)
@@ -261,12 +262,11 @@ func (d *ApplicationDao) CountPendingByApprover(ctx context.Context, userID int,
 	var query string
 	var args []interface{}
 	
-	args = append(args, model.ApplicationStatusPending, model.ApplicationStatusProcessing)
-	
 	if isAdmin {
-		query = `SELECT COUNT(*) FROM applications WHERE status IN (?, ?)`
+		query = `SELECT COUNT(*) FROM applications WHERE status IN (0, 1)`
 	} else {
-		query = `SELECT COUNT(*) FROM applications WHERE status IN (?, ?) AND department = ?`
+		// 部门管理员：本部门 + 排除全局权限申请
+		query = `SELECT COUNT(*) FROM applications WHERE status IN (0, 1) AND department = ? AND (type_code != 'temp_permission' OR data NOT LIKE '%manage:all%')`
 		args = append(args, department)
 	}
 	

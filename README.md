@@ -88,7 +88,7 @@ COLLATE utf8mb4_unicode_ci;
 
 ```bash
 cd backend
-cp config/config.example.yaml config/config.yaml
+cp configs/config.example.yaml configs/config.yaml
 # 编辑 config.yaml 配置数据库连接信息
 go mod download
 go run ./cmd/server/main.go
@@ -167,13 +167,16 @@ schedule-system-v2/
 ├── 📂 backend/              # Go后端
 │   ├── 📂 cmd/server/       # 程序入口
 │   ├── 📂 internal/         # 内部代码
+│   │   ├── 📂 auth/         # 权限定义
 │   │   ├── 📂 handler/      # HTTP处理器
 │   │   ├── 📂 service/      # 业务逻辑
 │   │   ├── 📂 dao/          # 数据访问
 │   │   ├── 📂 model/        # 数据模型
 │   │   ├── 📂 middleware/   # 中间件
-│   │   └── 📂 router/       # 路由
-│   ├── 📂 config/           # 配置文件
+│   │   ├── 📂 router/       # 路由
+│   │   ├── 📂 db/           # 数据库连接
+│   │   └── 📂 utils/        # 工具函数
+│   ├── 📂 configs/          # 配置文件
 │   └── 📂 static/           # 前端静态资源
 ├── 📂 frontend-v2/          # Vue3前端
 │   ├── 📂 src/

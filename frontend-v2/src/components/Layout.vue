@@ -97,9 +97,11 @@ const manageNavItems = computed(() => {
   if (userStore.canManageDept) {
     items.push({ path: '/schedule', name: '排班管理', icon: 'Edit' })
   }
+  if (userStore.canManageDept) {
+    items.push({ path: '/admin/users', name: '用户管理', icon: 'User' })
+  }
   if (userStore.canManageAll) {
     items.push({ path: '/admin/duty-assignments', name: '每周分工', icon: 'List' })
-    items.push({ path: '/admin/users', name: '用户管理', icon: 'User' })
     items.push({ path: '/admin/semester', name: '学期设置', icon: 'Date' })
   }
   if (userStore.isAdmin) {

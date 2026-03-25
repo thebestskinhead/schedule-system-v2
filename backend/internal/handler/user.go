@@ -86,13 +86,30 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 }
 
 func (h *UserHandler) GetUserList(c *gin.Context) {
-	// 使用新的权限检查工具
-	// 方式1: 使用辅助函数
-	if !auth.CheckPermission(c, auth.PermUserManage) {
-		return // CheckPermission 已经返回403响应
+	checker := auth.GetChecker(c)
+	hasManageAll := checker.HasPermission(auth.PermUserManage)
+	hasManageDept := checker.HasPermission(auth.PermUserManageDept)
+
+	if !hasManageAll && !hasManageDept {
+		auth.ResponseForbidden(c)
+		return
 	}
 
-	users, err := h.service.GetUserList()
+	var users []model.User
+	var err error
+
+	if hasManageAll {
+		users, err = h.service.GetUserList()
+	} else {
+		// 部门管理员只能查看本部门用户
+		dept := checker.GetDepartment()
+		if dept == "" {
+			utils.Error(c, 400, "未分配部门")
+			return
+		}
+		users, err = h.service.GetUserListByDepartment(dept)
+	}
+
 	if err != nil {
 		utils.Error(c, 500, "获取用户列表失败")
 		return
@@ -166,13 +183,18 @@ func (h *UserHandler) SetUserRole(c *gin.Context) {
 		return
 	}
 
-	adminID := auth.GetUserIDFromContext(c)
-
 	// 从路径参数获取用户ID
 	idStr := c.Param("id")
 	userID, err := strconv.Atoi(idStr)
 	if err != nil {
 		utils.Error(c, 400, "无效的用户ID")
+		return
+	}
+
+	// 不能修改自己的角色
+	currentUserID := auth.GetUserIDFromContext(c)
+	if currentUserID == userID {
+		utils.Error(c, 403, "不能修改自己的角色")
 		return
 	}
 
@@ -184,7 +206,7 @@ func (h *UserHandler) SetUserRole(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.SetUserRole(adminID, userID, req.Role); err != nil {
+	if err := h.service.SetUserRole(userID, req.Role); err != nil {
 		utils.Error(c, 403, err.Error())
 		return
 	}
@@ -317,8 +339,7 @@ func (h *UserHandler) SetUserDepartment(c *gin.Context) {
 		return
 	}
 
-	adminID := auth.GetUserIDFromContext(c)
-	if err := h.service.SetUserDepartment(adminID, userID, req.Department); err != nil {
+	if err := h.service.SetUserDepartment(userID, req.Department); err != nil {
 		utils.Error(c, 403, err.Error())
 		return
 	}
@@ -347,8 +368,7 @@ func (h *UserHandler) SetUserDeptRole(c *gin.Context) {
 		return
 	}
 
-	adminID := auth.GetUserIDFromContext(c)
-	if err := h.service.SetUserDeptRole(adminID, userID, req.DeptRole); err != nil {
+	if err := h.service.SetUserDeptRole(userID, req.DeptRole); err != nil {
 		utils.Error(c, 403, err.Error())
 		return
 	}
@@ -428,8 +448,7 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 		return
 	}
 
-	adminID := auth.GetUserIDFromContext(c)
-	user, err := h.service.AdminCreateUser(adminID, &req)
+	user, err := h.service.AdminCreateUser(&req)
 	if err != nil {
 		utils.Error(c, 403, err.Error())
 		return
@@ -448,9 +467,11 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 
 // AdminUpdateUser 管理员更新用户
 func (h *UserHandler) AdminUpdateUser(c *gin.Context) {
-	// 权限检查
 	checker := auth.GetChecker(c)
-	if !checker.HasPermission(auth.PermUserManage) {
+	hasManageAll := checker.HasPermission(auth.PermUserManage)
+	hasManageDept := checker.HasPermission(auth.PermUserManageDept)
+
+	if !hasManageAll && !hasManageDept {
 		auth.ResponseForbidden(c, "无权更新用户")
 		return
 	}
@@ -468,8 +489,43 @@ func (h *UserHandler) AdminUpdateUser(c *gin.Context) {
 		return
 	}
 
-	adminID := auth.GetUserIDFromContext(c)
-	if err := h.service.AdminUpdateUser(adminID, userID, &req); err != nil {
+	// 部门管理员范围限制
+	if !hasManageAll {
+		targetUser, err := h.service.GetUserByID(userID)
+		if err != nil {
+			utils.Error(c, 404, "用户不存在")
+			return
+		}
+		// 只能修改本部门用户
+		if targetUser.Department != checker.GetDepartment() {
+			auth.ResponseForbidden(c, "只能修改本部门用户")
+			return
+		}
+		// 不能修改系统管理员
+		if targetUser.Role == model.RoleAdmin {
+			auth.ResponseForbidden(c, "无权修改系统管理员")
+			return
+		}
+		// 部门管理员不能修改部门、系统角色、部门角色
+		req.Department = targetUser.Department
+		req.Role = targetUser.Role
+		req.DeptRole = targetUser.DeptRole
+	}
+
+	// 不能修改自己的角色/部门（防止临时权限提权）
+	currentUserID := auth.GetUserIDFromContext(c)
+	if currentUserID == userID {
+		targetUser, err := h.service.GetUserByID(userID)
+		if err != nil {
+			utils.Error(c, 404, "用户不存在")
+			return
+		}
+		req.Role = targetUser.Role
+		req.Department = targetUser.Department
+		req.DeptRole = targetUser.DeptRole
+	}
+
+	if err := h.service.AdminUpdateUser(userID, &req); err != nil {
 		utils.Error(c, 403, err.Error())
 		return
 	}
@@ -484,9 +540,11 @@ func (h *UserHandler) AdminUpdateUser(c *gin.Context) {
 // 确保可以追溯"谁排的班"、"谁值的班"、"谁审批的"等操作历史。
 // 已禁用的用户无法登录系统，也不会出现在用户列表中。
 func (h *UserHandler) DeleteUser(c *gin.Context) {
-	// 权限检查
 	checker := auth.GetChecker(c)
-	if !checker.HasPermission(auth.PermUserManage) {
+	hasManageAll := checker.HasPermission(auth.PermUserManage)
+	hasManageDept := checker.HasPermission(auth.PermUserManageDept)
+
+	if !hasManageAll && !hasManageDept {
 		auth.ResponseForbidden(c, "无权删除用户")
 		return
 	}
@@ -498,8 +556,25 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 		return
 	}
 
-	adminID := auth.GetUserIDFromContext(c)
-	if err := h.service.AdminDeleteUser(adminID, userID); err != nil {
+	// 部门管理员范围限制
+	if !hasManageAll {
+		targetUser, err := h.service.GetUserByID(userID)
+		if err != nil {
+			utils.Error(c, 404, "用户不存在")
+			return
+		}
+		if targetUser.Department != checker.GetDepartment() {
+			auth.ResponseForbidden(c, "只能删除本部门用户")
+			return
+		}
+		if targetUser.Role == model.RoleAdmin {
+			auth.ResponseForbidden(c, "无权删除系统管理员")
+			return
+		}
+	}
+
+	operatorID := auth.GetUserIDFromContext(c)
+	if err := h.service.AdminDeleteUser(operatorID, userID); err != nil {
 		utils.Error(c, 403, err.Error())
 		return
 	}

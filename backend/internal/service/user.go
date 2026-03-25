@@ -113,13 +113,8 @@ func (s *UserService) UpdateUser(userID int, req *model.UpdateUserRequest) error
 	return s.userDAO.Update(user)
 }
 
-func (s *UserService) SetUserRole(adminID, targetUserID int, role string) error {
-	admin, _ := s.userDAO.GetByID(adminID)
-	if admin == nil || admin.Role != "admin" {
-		return errors.New("无权限")
-	}
-
-	if role != "admin" && role != "user" {
+func (s *UserService) SetUserRole(targetUserID int, role string) error {
+	if role != model.RoleAdmin && role != model.RoleUser {
 		return errors.New("无效的角色")
 	}
 
@@ -145,14 +140,8 @@ func (s *UserService) GetUsersByFilter(filter model.UserListFilter) ([]model.Use
 	return s.userDAO.ListByFilter(filter)
 }
 
-// SetUserDepartment 设置用户部门
-func (s *UserService) SetUserDepartment(adminID, targetUserID int, dept string) error {
-	// 验证管理员权限
-	admin, _ := s.userDAO.GetByID(adminID)
-	if admin == nil || (admin.Role != model.RoleAdmin && admin.Department != "办公室") {
-		return errors.New("无权限")
-	}
-
+// SetUserDepartment 设置用户部门（权限由 handler 层校验）
+func (s *UserService) SetUserDepartment(targetUserID int, dept string) error {
 	// 验证部门是否有效
 	validDept := false
 	for _, d := range model.Departments {
@@ -168,35 +157,11 @@ func (s *UserService) SetUserDepartment(adminID, targetUserID int, dept string) 
 	return s.userDAO.SetDepartment(targetUserID, dept)
 }
 
-// SetUserDeptRole 设置用户部门角色
-func (s *UserService) SetUserDeptRole(adminID, targetUserID int, deptRole string) error {
-	// 验证管理员权限
-	admin, _ := s.userDAO.GetByID(adminID)
-	if admin == nil {
-		return errors.New("管理员不存在")
-	}
-
-	// 只有系统管理员或办公室管理员可以设置部门角色
-	if admin.Role != model.RoleAdmin && !(admin.Department == "办公室" && admin.DeptRole == model.DeptRoleAdmin) {
-		return errors.New("无权限设置部门角色")
-	}
-
+// SetUserDeptRole 设置用户部门角色（权限由 handler 层校验）
+func (s *UserService) SetUserDeptRole(targetUserID int, deptRole string) error {
 	// 验证角色是否有效
 	if deptRole != model.DeptRoleAdmin && deptRole != model.DeptRoleMember {
 		return errors.New("无效的部门角色")
-	}
-
-	// 获取目标用户
-	targetUser, _ := s.userDAO.GetByID(targetUserID)
-	if targetUser == nil {
-		return errors.New("用户不存在")
-	}
-
-	// 部门管理员只能设置本部门用户的角色
-	if admin.Role != model.RoleAdmin {
-		if admin.Department != targetUser.Department {
-			return errors.New("只能管理本部门用户")
-		}
 	}
 
 	return s.userDAO.SetDeptRole(targetUserID, deptRole)
@@ -207,17 +172,8 @@ func (s *UserService) GetUsersByDeptRole(deptRole string) ([]model.User, error) 
 	return s.userDAO.GetByDeptRole(deptRole)
 }
 
-// AdminCreateUser 管理员创建用户
-func (s *UserService) AdminCreateUser(adminID int, req *model.AdminCreateUserRequest) (*model.User, error) {
-	// 验证管理员权限
-	admin, _ := s.userDAO.GetByID(adminID)
-	if admin == nil {
-		return nil, errors.New("管理员不存在")
-	}
-	if admin.Role != model.RoleAdmin && !(admin.Department == "办公室" && admin.DeptRole == model.DeptRoleAdmin) {
-		return nil, errors.New("无权限创建用户")
-	}
-
+// AdminCreateUser 管理员创建用户（权限由 handler 层校验）
+func (s *UserService) AdminCreateUser(req *model.AdminCreateUserRequest) (*model.User, error) {
 	// 检查学号是否已存在
 	existing, _ := s.userDAO.GetByStudentID(req.StudentID)
 	if existing != nil {
@@ -258,33 +214,11 @@ func (s *UserService) AdminCreateUser(adminID int, req *model.AdminCreateUserReq
 	return user, nil
 }
 
-// AdminUpdateUser 管理员更新用户
-func (s *UserService) AdminUpdateUser(adminID, targetUserID int, req *model.AdminUpdateUserRequest) error {
-	// 验证管理员权限
-	admin, _ := s.userDAO.GetByID(adminID)
-	if admin == nil {
-		return errors.New("管理员不存在")
-	}
-
-	// 获取目标用户
+// AdminUpdateUser 管理员更新用户（权限和范围由 handler 层校验）
+func (s *UserService) AdminUpdateUser(targetUserID int, req *model.AdminUpdateUserRequest) error {
 	targetUser, err := s.userDAO.GetByID(targetUserID)
 	if err != nil {
 		return errors.New("用户不存在")
-	}
-
-	// 权限检查：系统管理员可以修改任何人，办公室管理员只能修改本部门用户
-	if admin.Role != model.RoleAdmin {
-		if !(admin.Department == "办公室" && admin.DeptRole == model.DeptRoleAdmin) {
-			return errors.New("无权限修改用户")
-		}
-		// 办公室管理员只能修改本部门用户
-		if targetUser.Department != admin.Department {
-			return errors.New("只能修改本部门用户")
-		}
-		// 办公室管理员不能修改系统管理员
-		if targetUser.Role == model.RoleAdmin {
-			return errors.New("无权限修改系统管理员")
-		}
 	}
 
 	// 如果邮箱变更，检查是否冲突
@@ -318,37 +252,10 @@ func (s *UserService) AdminUpdateUser(adminID, targetUserID int, req *model.Admi
 // - 归档用户关键信息（姓名、学号）到历史表
 // - 处理所有关联数据的外键约束
 // - 或者匿名化处理后删除
-func (s *UserService) AdminDeleteUser(adminID, targetUserID int) error {
-	// 验证管理员权限
-	admin, _ := s.userDAO.GetByID(adminID)
-	if admin == nil {
-		return errors.New("管理员不存在")
-	}
-
-	// 获取目标用户
-	targetUser, err := s.userDAO.GetByID(targetUserID)
-	if err != nil {
-		return errors.New("用户不存在")
-	}
-
+func (s *UserService) AdminDeleteUser(operatorID, targetUserID int) error {
 	// 不能删除自己
-	if adminID == targetUserID {
+	if operatorID == targetUserID {
 		return errors.New("不能删除自己")
-	}
-
-	// 权限检查
-	if admin.Role != model.RoleAdmin {
-		if !(admin.Department == "办公室" && admin.DeptRole == model.DeptRoleAdmin) {
-			return errors.New("无权限删除用户")
-		}
-		// 办公室管理员只能删除本部门用户
-		if targetUser.Department != admin.Department {
-			return errors.New("只能删除本部门用户")
-		}
-		// 办公室管理员不能删除系统管理员
-		if targetUser.Role == model.RoleAdmin {
-			return errors.New("无权限删除系统管理员")
-		}
 	}
 
 	return s.userDAO.Delete(targetUserID)

@@ -9,7 +9,7 @@ echo ""
 
 # 构建前端
 echo "[1/3] 构建前端..."
-cd frontend
+cd frontend-v2
 npm install
 npm run build
 if [ $? -ne 0 ]; then
@@ -23,7 +23,7 @@ echo ""
 echo "[2/3] 复制前端文件到后端..."
 cd ..
 rm -rf backend/dist
-cp -r frontend/dist backend/
+cp -r frontend-v2/dist backend/
 echo "复制完成"
 echo ""
 

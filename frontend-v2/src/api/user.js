@@ -14,6 +14,9 @@ export const changePassword = (data) => request.post('/user/change-password', da
 // 排班相关用户查询
 export const getUsersForSchedule = () => request.get('/users/for-schedule')
 
+// 部门列表
+export const getDepartments = () => request.get('/departments')
+
 // 用户管理
 export const getUserList = (params) => request.get('/admin/users', { params })
 export const getUserListByDepartment = (dept) => request.get('/admin/users/by-dept', { params: { department: dept } })

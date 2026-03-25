@@ -19,20 +19,20 @@ mkdir -p $OUTPUT_DIR
 
 # 构建前端
 echo "[2/5] 构建前端..."
-cd frontend
+cd frontend-v2
 npm run build 2>&1 | tail -5
 cd ..
 
 # 构建后端
 echo "[3/5] 构建后端..."
 cd backend
-go build -o ../$OUTPUT_DIR/server ./cmd/main.go 2>&1
+go build -o ../$OUTPUT_DIR/server ./cmd/server/main.go 2>&1
 cd ..
 
 # 复制前端产物到后端dist目录
 echo "[4/5] 整合前端资源..."
 mkdir -p $OUTPUT_DIR/dist
-cp -r frontend/dist/* $OUTPUT_DIR/dist/
+cp -r frontend-v2/dist/* $OUTPUT_DIR/dist/
 
 # 复制必要文件
 echo "[5/5] 复制配置文件..."

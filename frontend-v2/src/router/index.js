@@ -60,7 +60,7 @@ const routes = [
         path: 'admin/users',
         name: 'UserManagement',
         component: () => import('../views/UserManagement.vue'),
-        meta: { requiresManageAll: true }
+        meta: { requiresManageDept: true }
       },
       {
         path: 'admin/temp-permissions',

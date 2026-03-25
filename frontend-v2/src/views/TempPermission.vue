@@ -4,15 +4,19 @@
     <div class="stats-cards" v-if="stats">
       <div class="stat-card" @click="activeTab = 'myApplications'" :class="{ active: activeTab === 'myApplications' }">
         <div class="stat-value">{{ stats.my_applications?.pending || 0 }}</div>
-        <div class="stat-label">我的待审批</div>
+        <div class="stat-label">待审批</div>
       </div>
       <div class="stat-card" @click="activeTab = 'pendingApprovals'" :class="{ active: activeTab === 'pendingApprovals' }" v-if="canApprove">
         <div class="stat-value stat-warning">{{ stats.pending_approval || 0 }}</div>
         <div class="stat-label">待我审批</div>
       </div>
       <div class="stat-card">
-        <div class="stat-value">{{ stats.my_applications?.approved || 0 }}</div>
+        <div class="stat-value stat-success">{{ stats.my_applications?.approved || 0 }}</div>
         <div class="stat-label">已通过</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value stat-danger">{{ stats.my_applications?.rejected || 0 }}</div>
+        <div class="stat-label">已拒绝</div>
       </div>
     </div>
 
@@ -191,7 +195,7 @@
       <el-alert
         type="info"
         :closable="false"
-        description="请填写权限申请信息，提交后将发送给您的部门管理员审批"
+        :description="requestForm.permission && isGlobalPerm(requestForm.permission) ? '全局权限申请将发送给办公室管理员或系统管理员审批' : '请填写权限申请信息，提交后将发送给您的部门管理员审批'"
         style="margin-bottom: 16px"
       />
       <el-form :model="requestForm" :rules="requestRules" ref="requestFormRef" label-width="100px">
@@ -403,9 +407,9 @@ const approvalFormRef = ref()
 const selectedApp = ref(null)
 const approvalAction = ref('approve')
 
-// 权限判断
-const canGrant = computed(() => userStore.canManageDept || userStore.canManageAll)
-const canApprove = computed(() => userStore.canManageDept || userStore.canManageAll)
+// 权限判断 - 仅基于用户身份，不包含临时权限
+const canGrant = computed(() => userStore.isAdmin || userStore.isOfficeAdmin || userStore.isDeptAdmin)
+const canApprove = computed(() => userStore.isAdmin || userStore.isOfficeAdmin || userStore.isDeptAdmin)
 
 // 表单数据
 const requestForm = reactive({
@@ -509,6 +513,8 @@ const parseData = (data) => {
   }
   return data
 }
+
+const isGlobalPerm = (perm) => perm === 'schedule:manage:all' || perm === 'user:manage:all'
 
 const disabledDate = (time) => {
   return time.getTime() < Date.now() - 8.64e7
@@ -770,10 +776,11 @@ onMounted(() => {
   
   // 所有用户都加载申请相关数据
   loadMyApplications()
+  loadStats()
+  // 基于角色的审批人加载待审批列表
   if (canApprove.value) {
     loadPendingApprovals()
   }
-  loadStats()
 })
 </script>
 
@@ -812,6 +819,18 @@ onMounted(() => {
 
 .stat-value.stat-warning {
   color: #e6a23c;
+}
+
+.stat-value.stat-success {
+  color: #67c23a;
+}
+
+.stat-value.stat-danger {
+  color: #f56c6c;
+}
+
+.stat-value.stat-processing {
+  color: #409eff;
 }
 
 .stat-label {

@@ -2,10 +2,18 @@ package main
 
 import (
 	"log"
+	"os"
 	"schedule-system-v2/backend/internal/config"
 	"schedule-system-v2/backend/internal/db"
 	"schedule-system-v2/backend/internal/router"
 )
+
+func init() {
+	// 设置时区为北京时间
+	if tz := os.Getenv("TZ"); tz == "" {
+		os.Setenv("TZ", "Asia/Shanghai")
+	}
+}
 
 func main() {
 	log.Println("启动排班系统...")

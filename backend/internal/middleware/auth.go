@@ -53,6 +53,24 @@ func PermissionMiddleware(perm auth.Permission) gin.HandlerFunc {
 	return auth.Middleware(perm)
 }
 
+// PermissionAnyMiddleware 多权限"任一满足"中间件
+func PermissionAnyMiddleware(perms ...auth.Permission) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		checker := auth.FromContext(c)
+		for _, perm := range perms {
+			if checker.HasPermission(perm) {
+				c.Next()
+				return
+			}
+		}
+		c.JSON(http.StatusForbidden, model.Response{
+			Code:    403,
+			Message: "无权限执行此操作",
+		})
+		c.Abort()
+	}
+}
+
 // RequireAuthAndPermission 认证并检查权限
 func RequireAuthAndPermission(perm auth.Permission) gin.HandlerFunc {
 	return func(c *gin.Context) {

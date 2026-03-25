@@ -137,11 +137,12 @@ func SetupRouter() *gin.Engine {
 	// 需要管理员权限的API（使用新的权限检查中间件）
 	admin := authGroup.Group("/admin")
 	{
-		// 用户管理
-		admin.GET("/users", middleware.PermissionMiddleware(auth.PermUserManage), userHandler.GetUserList)
+		// 用户管理（PermUserManage 或 PermUserManageDept 均可访问，部门级限制在 handler 中处理）
+		userPermMW := middleware.PermissionAnyMiddleware(auth.PermUserManage, auth.PermUserManageDept)
+		admin.GET("/users", userPermMW, userHandler.GetUserList)
 		admin.POST("/users", middleware.PermissionMiddleware(auth.PermUserManage), userHandler.CreateUser)
-		admin.PUT("/users/:id", middleware.PermissionMiddleware(auth.PermUserManage), userHandler.AdminUpdateUser)
-		admin.DELETE("/users/:id", middleware.PermissionMiddleware(auth.PermUserManage), userHandler.DeleteUser)
+		admin.PUT("/users/:id", userPermMW, userHandler.AdminUpdateUser)
+		admin.DELETE("/users/:id", userPermMW, userHandler.DeleteUser)
 		admin.PUT("/users/:id/role", middleware.PermissionMiddleware(auth.PermUserSetRole), userHandler.SetUserRole)
 		admin.GET("/users/by-dept", middleware.PermissionMiddleware(auth.PermUserManageDept), userHandler.GetUserListByDepartment)
 		admin.PUT("/users/:id/department", middleware.PermissionMiddleware(auth.PermUserManage), userHandler.SetUserDepartment)

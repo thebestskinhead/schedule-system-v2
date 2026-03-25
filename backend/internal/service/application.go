@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"schedule-system-v2/backend/internal/dao"
@@ -165,7 +166,14 @@ func (s *ApplicationService) CreateApplication(ctx context.Context, userID int, 
 
 // GetMyApplications 获取我的申请列表
 func (s *ApplicationService) GetMyApplications(ctx context.Context, userID int, status string, page, pageSize int) ([]model.Application, int, error) {
-	return s.applicationDao.GetByApplicant(ctx, userID, status, page, pageSize)
+	// 将字符串状态转换为 int，空字符串表示不筛选
+	statusInt := -1
+	if status != "" {
+		if v, err := strconv.Atoi(status); err == nil {
+			statusInt = v
+		}
+	}
+	return s.applicationDao.GetByApplicant(ctx, userID, statusInt, page, pageSize)
 }
 
 // GetPendingApprovals 获取待我审批的申请
@@ -338,7 +346,21 @@ func (s *ApplicationService) canApprove(ctx context.Context, app *model.Applicat
 		if err != nil {
 			return false, err
 		}
-		return user.DeptRole == "dept_admin" && user.Department == applicant.Department, nil
+		if user.DeptRole != "dept_admin" || user.Department != applicant.Department {
+			return false, nil
+		}
+		// 权限范围检查：部门管理员不能审批全局权限申请
+		if app.TypeCode == "temp_permission" && len(app.Data) > 0 {
+			var permData struct {
+				Permission string `json:"permission"`
+			}
+			if err := json.Unmarshal(app.Data, &permData); err == nil {
+				if isGlobalPermission(permData.Permission) {
+					return false, nil
+				}
+			}
+		}
+		return true, nil
 	}
 
 	// 检查审批角色
@@ -354,7 +376,21 @@ func (s *ApplicationService) canApprove(ctx context.Context, app *model.Applicat
 		if err != nil {
 			return false, err
 		}
-		return user.Department == applicant.Department, nil
+		if user.Department != applicant.Department {
+			return false, nil
+		}
+		// 权限范围检查：部门管理员不能审批全局权限申请
+		if app.TypeCode == "temp_permission" && len(app.Data) > 0 {
+			var permData struct {
+				Permission string `json:"permission"`
+			}
+			if err := json.Unmarshal(app.Data, &permData); err == nil {
+				if isGlobalPermission(permData.Permission) {
+					return false, nil
+				}
+			}
+		}
+		return true, nil
 	case "office_admin":
 		return user.Department == "办公室" && user.DeptRole == "dept_admin", nil
 	default:
@@ -400,23 +436,28 @@ func (s *ApplicationService) GetApplicationStats(ctx context.Context, userID int
 	stats := make(map[string]interface{})
 
 	// 我的申请统计
-	myPending, err := s.applicationDao.CountByApplicantAndStatus(ctx, userID, string(model.ApplicationStatusPending))
+	myPending, err := s.applicationDao.CountByApplicantAndStatus(ctx, userID, int(model.ApplicationStatusPending))
 	if err != nil {
 		return nil, err
 	}
-	myApproved, err := s.applicationDao.CountByApplicantAndStatus(ctx, userID, string(model.ApplicationStatusApproved))
+	myProcessing, err := s.applicationDao.CountByApplicantAndStatus(ctx, userID, int(model.ApplicationStatusProcessing))
 	if err != nil {
 		return nil, err
 	}
-	myRejected, err := s.applicationDao.CountByApplicantAndStatus(ctx, userID, string(model.ApplicationStatusRejected))
+	myApproved, err := s.applicationDao.CountByApplicantAndStatus(ctx, userID, int(model.ApplicationStatusApproved))
+	if err != nil {
+		return nil, err
+	}
+	myRejected, err := s.applicationDao.CountByApplicantAndStatus(ctx, userID, int(model.ApplicationStatusRejected))
 	if err != nil {
 		return nil, err
 	}
 
 	stats["my_applications"] = map[string]int{
-		"pending":  myPending,
-		"approved": myApproved,
-		"rejected": myRejected,
+		"pending":    myPending,
+		"processing": myProcessing,
+		"approved":   myApproved,
+		"rejected":   myRejected,
 	}
 
 	// 待我审批统计

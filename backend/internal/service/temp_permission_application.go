@@ -125,33 +125,77 @@ func (e *TempPermissionExecutor) GetRequiredApprovers(ctx context.Context, app *
 		return nil, err
 	}
 
+	// 解析申请的权限
+	var data struct {
+		Permission string `json:"permission"`
+	}
+	if err := json.Unmarshal(app.Data, &data); err != nil || data.Permission == "" {
+		return nil, fmt.Errorf("无法解析申请的权限信息")
+	}
+
 	var approverIDs []int
 
-	// 查找申请人的部门管理员
-	deptAdmins, err := e.userDao.GetByDepartmentAndRole(applicant.Department, "dept_admin")
-	if err != nil {
-		return nil, err
-	}
-	for _, admin := range deptAdmins {
-		if admin.ID != app.ApplicantID { // 不能审批自己的申请
-			approverIDs = append(approverIDs, admin.ID)
+	if isGlobalPermission(data.Permission) {
+		// 全局权限（如 user:manage:all, schedule:manage:all）→ 发给办公室管理员或系统管理员
+		officeAdmins, err := e.userDao.GetByDepartmentAndRole("办公室", "dept_admin")
+		if err == nil {
+			for _, admin := range officeAdmins {
+				if admin.ID != app.ApplicantID {
+					approverIDs = append(approverIDs, admin.ID)
+				}
+			}
 		}
-	}
-
-	// 如果没有部门管理员，查找系统管理员
-	if len(approverIDs) == 0 {
-		admins, err := e.userDao.GetByRole("admin")
+		if len(approverIDs) == 0 {
+			admins, err := e.userDao.GetByRole("admin")
+			if err != nil {
+				return nil, err
+			}
+			for _, admin := range admins {
+				if admin.ID != app.ApplicantID {
+					approverIDs = append(approverIDs, admin.ID)
+				}
+			}
+		}
+	} else {
+		// 部门级权限 → 发给部门管理员，无则回退到办公室管理员或系统管理员
+		deptAdmins, err := e.userDao.GetByDepartmentAndRole(applicant.Department, "dept_admin")
 		if err != nil {
 			return nil, err
 		}
-		for _, admin := range admins {
+		for _, admin := range deptAdmins {
 			if admin.ID != app.ApplicantID {
 				approverIDs = append(approverIDs, admin.ID)
+			}
+		}
+		if len(approverIDs) == 0 {
+			officeAdmins, err := e.userDao.GetByDepartmentAndRole("办公室", "dept_admin")
+			if err == nil {
+				for _, admin := range officeAdmins {
+					if admin.ID != app.ApplicantID {
+						approverIDs = append(approverIDs, admin.ID)
+					}
+				}
+			}
+		}
+		if len(approverIDs) == 0 {
+			admins, err := e.userDao.GetByRole("admin")
+			if err != nil {
+				return nil, err
+			}
+			for _, admin := range admins {
+				if admin.ID != app.ApplicantID {
+					approverIDs = append(approverIDs, admin.ID)
+				}
 			}
 		}
 	}
 
 	return approverIDs, nil
+}
+
+// isGlobalPermission 判断是否为全局权限
+func isGlobalPermission(perm string) bool {
+	return perm == "schedule:manage:all" || perm == "user:manage:all"
 }
 
 // CanApply 检查用户是否可以提交申请
@@ -167,7 +211,7 @@ func (e *TempPermissionExecutor) CanApply(ctx context.Context, userID int, data 
 	}
 
 	// 检查是否已有相同权限的待审批申请
-	apps, _, err := e.applicationDao.GetByApplicant(ctx, userID, string(model.ApplicationStatusPending), 1, 100)
+	apps, _, err := e.applicationDao.GetByApplicant(ctx, userID, int(model.ApplicationStatusPending), 1, 100)
 	if err != nil {
 		return false, "查询申请记录失败"
 	}

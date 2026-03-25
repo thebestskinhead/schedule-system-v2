@@ -19,7 +19,7 @@ mkdir -p $OUTPUT_DIR
 
 # 构建前端
 echo "[2/6] 构建前端..."
-cd frontend
+cd frontend-v2
 npm run build 2>&1 | tail -3
 cd ..
 
@@ -32,7 +32,7 @@ cd ..
 # 复制前端资源
 echo "[4/6] 复制前端资源..."
 mkdir -p $OUTPUT_DIR/dist
-cp -r frontend/dist/* $OUTPUT_DIR/dist/
+cp -r frontend-v2/dist/* $OUTPUT_DIR/dist/
 
 # 复制数据库脚本
 echo "[5/6] 复制配置文件..."

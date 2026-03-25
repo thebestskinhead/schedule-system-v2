@@ -2,7 +2,11 @@
   <div class="main-container">
     <div class="card">
       <div class="card-header">
-        <span class="card-title">用户管理</span>
+        <span class="card-title">
+          {{ isGlobalAdmin ? '用户管理' : '部门用户管理' }}
+          <el-tag v-if="!isGlobalAdmin" size="small" type="info" style="margin-left: 8px">{{ userStore.user?.department }}</el-tag>
+        </span>
+        <el-button v-if="isGlobalAdmin" type="primary" @click="createUser">新增用户</el-button>
       </div>
 
       <el-table :data="userList" v-loading="loading" class="data-table">
@@ -28,15 +32,15 @@
         </el-table-column>
         <el-table-column label="操作" width="180">
           <template #default="{ row }">
-            <el-button link type="primary" @click="editUser(row)">编辑</el-button>
-            <el-button link type="danger" @click="deleteUserById(row)">删除</el-button>
+            <el-button v-if="!isSelf(row)" link type="primary" @click="editUser(row)">编辑</el-button>
+            <el-button v-if="canDeleteUser(row) && !isSelf(row)" link type="danger" @click="deleteUserById(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
     </div>
 
-    <!-- 编辑用户 -->
-    <el-dialog v-model="dialogVisible" title="编辑用户" width="500px">
+    <!-- 编辑/新增用户 -->
+    <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑用户' : '新增用户'" width="500px">
       <el-form :model="form" :rules="rules" ref="formRef" label-width="80px">
         <el-form-item label="学号" prop="student_id">
           <el-input v-model="form.student_id" :disabled="isEdit" />
@@ -47,23 +51,23 @@
         <el-form-item label="邮箱" prop="email">
           <el-input v-model="form.email" />
         </el-form-item>
-        <el-form-item label="部门">
+        <el-form-item v-if="isGlobalAdmin" label="部门">
           <el-select v-model="form.department" style="width: 100%">
-            <el-option label="办公室" value="办公室" />
-            <el-option label="竞赛部" value="竞赛部" />
-            <el-option label="项目部" value="项目部" />
-            <el-option label="科普部" value="科普部" />
+            <el-option v-for="dept in departments" :key="dept" :label="dept" :value="dept" />
           </el-select>
         </el-form-item>
-        <el-form-item label="系统角色">
+        <el-form-item v-if="isGlobalAdmin" label="系统角色">
           <el-radio-group v-model="form.role">
             <el-radio-button value="user">普通用户</el-radio-button>
             <el-radio-button value="admin">系统管理员</el-radio-button>
           </el-radio-group>
           <div class="role-hint">提示：办公室管理员请选择部门为"办公室"并开启部门管理员</div>
         </el-form-item>
-        <el-form-item label="部门角色">
+        <el-form-item v-if="isGlobalAdmin" label="部门角色">
           <el-switch v-model="form.isDeptAdmin" active-text="部门管理员" />
+        </el-form-item>
+        <el-form-item v-if="!isEdit && isGlobalAdmin" label="初始密码">
+          <el-input v-model="form.password" type="password" show-password placeholder="默认 123456" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -75,15 +79,23 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getUserList, updateUser, deleteUser } from '../api/user'
+import { getUserList, getUserListByDepartment, createUser, updateUser, deleteUser } from '../api/user'
+import { getDepartments } from '../api/user'
+import { useUserStore } from '../stores/user'
+
+const userStore = useUserStore()
+
+// 是否为全局管理员（系统管理员或办公室管理员），可管理所有用户
+const isGlobalAdmin = computed(() => userStore.canManageAll)
 
 const loading = ref(false)
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 const submitting = ref(false)
 const userList = ref([])
+const departments = ref([])
 const formRef = ref()
 
 const form = reactive({
@@ -93,7 +105,8 @@ const form = reactive({
   email: '',
   department: '',
   role: 'user',
-  isDeptAdmin: false
+  isDeptAdmin: false,
+  password: ''
 })
 
 const rules = {
@@ -105,12 +118,54 @@ const rules = {
 const fetchUsers = async () => {
   loading.value = true
   try {
-    const data = await getUserList()
+    let data
+    if (isGlobalAdmin.value) {
+      data = await getUserList()
+    } else {
+      const dept = userStore.user?.department
+      data = await getUserListByDepartment(dept)
+    }
     userList.value = data || []
   } finally {
     loading.value = false
   }
 }
+
+const fetchDepartments = async () => {
+  try {
+    const data = await getDepartments()
+    departments.value = data?.departments || []
+  } catch {}
+}
+
+const canDeleteUser = (row) => {
+  if (!isGlobalAdmin.value) {
+    // 部门管理员不能删除系统管理员
+    if (row.role === 'admin') return false
+  }
+  return true
+}
+
+const isSelf = (row) => {
+  return row.id === userStore.user?.id
+}
+
+const openCreateDialog = () => {
+  isEdit.value = false
+  Object.assign(form, {
+    id: null,
+    student_id: '',
+    name: '',
+    email: '',
+    department: userStore.user?.department || '',
+    role: 'user',
+    isDeptAdmin: false,
+    password: ''
+  })
+  dialogVisible.value = true
+}
+
+const createUser2 = openCreateDialog
 
 const editUser = (row) => {
   isEdit.value = true
@@ -120,7 +175,7 @@ const editUser = (row) => {
     name: row.name,
     email: row.email,
     department: row.department,
-    role: row.role,  // role 只能是 'user' 或 'admin'
+    role: row.role,
     isDeptAdmin: row.dept_role === 'dept_admin',
     password: ''
   })
@@ -133,17 +188,33 @@ const submitForm = async () => {
 
   submitting.value = true
   try {
-    const data = {
-      student_id: form.student_id,
-      name: form.name,
-      email: form.email,
-      department: form.department,
-      role: form.role,
-      dept_role: form.isDeptAdmin ? 'dept_admin' : 'dept_member'
+    if (isEdit.value) {
+      const data = {
+        name: form.name,
+        email: form.email,
+      }
+      if (isGlobalAdmin.value) {
+        data.department = form.department
+        data.role = form.role
+        data.dept_role = form.isDeptAdmin ? 'dept_admin' : 'dept_member'
+      }
+      await updateUser(form.id, data)
+      ElMessage.success('更新成功')
+    } else {
+      const data = {
+        student_id: form.student_id,
+        name: form.name,
+        email: form.email,
+        department: form.department,
+        role: form.role,
+        dept_role: form.isDeptAdmin ? 'dept_admin' : 'dept_member',
+      }
+      if (form.password) {
+        data.password = form.password
+      }
+      await createUser(data)
+      ElMessage.success('创建成功')
     }
-
-    await updateUser(form.id, data)
-    ElMessage.success('更新成功')
     dialogVisible.value = false
     fetchUsers()
   } finally {
@@ -162,6 +233,7 @@ const deleteUserById = async (row) => {
 
 onMounted(() => {
   fetchUsers()
+  fetchDepartments()
 })
 </script>
 
