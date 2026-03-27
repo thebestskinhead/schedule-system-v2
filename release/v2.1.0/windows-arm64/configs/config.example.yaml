@@ -1,0 +1,20 @@
+server:
+    port: "8080"
+    mode: debug  # debug 或 release
+
+database:
+    host: localhost
+    port: "3306"
+    user: root
+    password: your_password_here
+    dbname: schedule_system_v2
+    charset: utf8mb4
+
+jwt:
+    secret: your-secret-key-here
+    expire: 168  # 小时
+
+site:
+    domain: http://localhost:8080
+
+installed: false

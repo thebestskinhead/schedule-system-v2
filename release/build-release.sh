@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # ============================================
-# 排班管理系统 V2.0.1 - 多平台发布构建脚本
+# 排班管理系统 V2.1.0 - 多平台发布构建脚本
 # ============================================
 #
 # 用法:
 #   ./release/build-release.sh [版本号]
 #
 # 示例:
-#   ./release/build-release.sh v2.0.1
+#   ./release/build-release.sh v2.1.0
 #
 # 前置要求:
 #   - Go 1.21+
@@ -16,7 +16,7 @@
 #   - zip (打包用)
 #
 # 输出:
-#   release/v2.0.1/
+#   release/v2.1.0/
 #   ├── linux-amd64/     ... + .zip
 #   ├── linux-arm64/     ... + .zip
 #   ├── windows-amd64/   ... + .zip
@@ -26,7 +26,7 @@
 
 set -e
 
-VERSION=${1:-"v2.0.1"}
+VERSION=${1:-"v2.1.0"}
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTPUT_DIR="$SCRIPT_DIR/$VERSION"
@@ -38,12 +38,25 @@ echo "项目目录: $PROJECT_DIR"
 echo "输出目录: $OUTPUT_DIR"
 echo ""
 
-# ---- 构建前端 ----
-echo "[1/5] 构建前端..."
+# ---- 清理旧构建 ----
+echo "[0/6] 清理旧构建..."
+rm -rf "$OUTPUT_DIR"
+mkdir -p "$OUTPUT_DIR"
+
+# ---- 构建电脑端前端 ----
+echo "[1/6] 构建电脑端前端..."
 cd "$PROJECT_DIR/frontend-v2"
 npm install --silent 2>/dev/null
 npm run build 2>&1 | grep -E "(error|built in)" || true
-echo "前端构建完成"
+echo "电脑端前端构建完成"
+echo ""
+
+# ---- 构建移动端前端 ----
+echo "[2/6] 构建移动端前端..."
+cd "$PROJECT_DIR/frontend-mobile"
+npm install --silent 2>/dev/null
+npm run build 2>&1 | grep -E "(error|built in)" || true
+echo "移动端前端构建完成"
 echo ""
 
 # ---- 构建后端（多平台） ----
@@ -54,7 +67,7 @@ PLATFORMS=(
     "windows/arm64"
 )
 
-echo "[2/5] 构建后端（多平台）..."
+echo "[3/6] 构建后端（多平台）..."
 for PLATFORM in "${PLATFORMS[@]}"; do
     IFS='/' read -r GOOS GOARCH <<< "$PLATFORM"
     OUTPUT_NAME="schedule-server"
@@ -73,15 +86,19 @@ echo "后端构建完成"
 echo ""
 
 # ---- 复制公共文件 ----
-echo "[3/5] 复制公共文件..."
+echo "[4/6] 复制公共文件..."
 
 for PLATFORM in "${PLATFORMS[@]}"; do
     IFS='/' read -r GOOS GOARCH <<< "$PLATFORM"
     PLATFORM_DIR="$OUTPUT_DIR/${GOOS}-${GOARCH}"
 
-    # 前端资源
+    # 电脑端前端资源
     mkdir -p "$PLATFORM_DIR/dist"
     cp -r "$PROJECT_DIR/frontend-v2/dist/"* "$PLATFORM_DIR/dist/"
+
+    # 移动端前端资源
+    mkdir -p "$PLATFORM_DIR/dist-mobile"
+    cp -r "$PROJECT_DIR/frontend-mobile/dist/"* "$PLATFORM_DIR/dist-mobile/"
 
     # 配置文件
     mkdir -p "$PLATFORM_DIR/configs"
@@ -89,13 +106,17 @@ for PLATFORM in "${PLATFORMS[@]}"; do
 
     # 文档
     mkdir -p "$PLATFORM_DIR/docs"
-    cp "$PROJECT_DIR/docs/"*.md "$PLATFORM_DIR/docs/"
+    cp "$PROJECT_DIR/docs/"*.md "$PLATFORM_DIR/docs/" 2>/dev/null || true
 done
+
+# 复制CHANGELOG
+cp "$PROJECT_DIR/release/$VERSION/CHANGELOG.md" "$OUTPUT_DIR/" 2>/dev/null || true
+
 echo "公共文件复制完成"
 echo ""
 
 # ---- 打包 ----
-echo "[4/5] 打包..."
+echo "[5/6] 打包..."
 
 cd "$OUTPUT_DIR"
 
@@ -114,16 +135,21 @@ for PLATFORM in "${PLATFORMS[@]}"; do
     fi
 done
 
-# 纯前端包
-echo "  - 打包前端..."
+# 纯前端包（电脑端）
+echo "  - 打包电脑端前端..."
 cd "$PROJECT_DIR/frontend-v2"
 zip -rq "$OUTPUT_DIR/schedule-system-${VERSION}-frontend.zip" dist/
+
+# 纯前端包（移动端）
+echo "  - 打包移动端前端..."
+cd "$PROJECT_DIR/frontend-mobile"
+zip -rq "$OUTPUT_DIR/schedule-system-${VERSION}-frontend-mobile.zip" dist/
 
 echo "打包完成"
 echo ""
 
 # ---- 汇总 ----
-echo "[5/5] 汇总"
+echo "[6/6] 汇总"
 echo ""
 echo "================================"
 echo "  构建完成! ($VERSION)"
@@ -147,4 +173,8 @@ echo "  1. 将对应平台目录上传到服务器"
 echo "  2. 解压或直接使用"
 echo "  3. 修改 configs/config.yaml 配置数据库"
 echo "  4. 运行 start.sh (Linux) 或 start.bat (Windows)"
+echo ""
+echo "访问地址:"
+echo "  电脑端: http://localhost:8080/"
+echo "  移动端: http://localhost:8080/mobile/"
 echo ""
