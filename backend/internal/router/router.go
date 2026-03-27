@@ -10,12 +10,13 @@ import (
 	"schedule-system-v2/backend/internal/handler"
 	"schedule-system-v2/backend/internal/middleware"
 	"schedule-system-v2/backend/internal/service"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
 
+// getDistPath 获取电脑端前端路径
 func getDistPath() string {
-	// 首先查找本目录下的 dist 或 frontend/dist
 	paths := []string{
 		"./dist",
 		"./frontend/dist",
@@ -30,6 +31,21 @@ func getDistPath() string {
 		}
 	}
 	return "./dist"
+}
+
+// getMobileDistPath 获取移动端前端路径
+func getMobileDistPath() string {
+	paths := []string{
+		"./dist-mobile",
+		"./frontend-mobile/dist",
+		"dist-mobile",
+	}
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return "./dist-mobile"
 }
 
 func SetupRouter() *gin.Engine {
@@ -118,6 +134,7 @@ func SetupRouter() *gin.Engine {
 		authGroup.DELETE("/availability", middleware.PermissionMiddleware(auth.PermAvailabilityEdit), availabilityHandler.DeleteAvailability)
 		authGroup.POST("/availability/import/cookie", middleware.PermissionMiddleware(auth.PermAvailabilityImport), availabilityHandler.ImportFromCookie)
 		authGroup.POST("/availability/import/xls", middleware.PermissionMiddleware(auth.PermAvailabilityImport), availabilityHandler.ImportFromXLS)
+		authGroup.POST("/availability/import/xls-base64", middleware.PermissionMiddleware(auth.PermAvailabilityImport), availabilityHandler.ImportFromXLSBase64)
 		authGroup.GET("/availability/import/status", middleware.PermissionMiddleware(auth.PermAvailabilityImport), availabilityHandler.GetImportTaskStatus)
 		authGroup.GET("/availability/import/tasks", middleware.PermissionMiddleware(auth.PermAvailabilityImport), availabilityHandler.GetImportTaskList)
 
@@ -228,8 +245,10 @@ func SetupRouter() *gin.Engine {
 
 	// 静态文件服务
 	distPath := getDistPath()
+	mobileDistPath := getMobileDistPath()
 	assetsPath := filepath.Join(distPath, "assets")
 	indexPath := filepath.Join(distPath, "index.html")
+	mobileIndexPath := filepath.Join(mobileDistPath, "index.html")
 
 	// 阻止已安装系统访问 init 页面
 	r.Use(func(c *gin.Context) {
@@ -247,6 +266,40 @@ func SetupRouter() *gin.Engine {
 		c.Next()
 	})
 
+	// 移动端前端路由 - /mobile 及其子路径
+	r.GET("/mobile", func(c *gin.Context) {
+		if _, err := os.Stat(mobileIndexPath); err == nil {
+			c.File(mobileIndexPath)
+		} else {
+			c.JSON(http.StatusOK, gin.H{
+				"code":    200,
+				"message": "移动端前端未构建",
+			})
+		}
+	})
+	r.GET("/mobile/*action", func(c *gin.Context) {
+		// 检查是否是静态资源请求
+		action := c.Param("action")
+		if strings.HasPrefix(action, "/assets/") {
+			// 静态资源文件
+			filePath := filepath.Join(mobileDistPath, action[1:])
+			if _, err := os.Stat(filePath); err == nil {
+				c.File(filePath)
+				return
+			}
+		}
+		// 其他路径返回 index.html (SPA路由)
+		if _, err := os.Stat(mobileIndexPath); err == nil {
+			c.File(mobileIndexPath)
+		} else {
+			c.JSON(http.StatusOK, gin.H{
+				"code":    200,
+				"message": "移动端前端未构建",
+			})
+		}
+	})
+
+	// 电脑端静态资源
 	r.Static("/assets", assetsPath)
 	r.StaticFile("/", indexPath)
 

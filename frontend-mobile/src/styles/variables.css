@@ -1,0 +1,98 @@
+:root {
+  /* 品牌色 */
+  --color-primary: #1989FA;
+  --color-primary-light: #E6F2FF;
+  --color-primary-dark: #0F7AE7;
+
+  /* 功能色 */
+  --color-success: #07C160;
+  --color-success-light: #E6F7EF;
+  --color-warning: #FF976A;
+  --color-warning-light: #FFF3ED;
+  --color-danger: #EE0A24;
+  --color-danger-light: #FFEBED;
+
+  /* 中性色 */
+  --color-text-primary: #323233;
+  --color-text-secondary: #646566;
+  --color-text-tertiary: #969799;
+  --color-text-placeholder: #C8C9CC;
+
+  /* 背景色 */
+  --color-bg: #F7F8FA;
+  --color-surface: #FFFFFF;
+  --color-border: #EBEDF0;
+
+  /* 字体 */
+  --font-family-base: -apple-system, BlinkMacSystemFont, 'Helvetica Neue',
+                      Helvetica, Segoe UI, Arial, Roboto, 'PingFang SC',
+                      'miui', 'Hiragino Sans GB', 'Microsoft Yahei', sans-serif;
+  --font-size-h1: 20px;
+  --font-size-h2: 18px;
+  --font-size-h3: 16px;
+  --font-size-body: 14px;
+  --font-size-small: 12px;
+  --font-size-mini: 10px;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+
+  /* 间距 */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space: 16px;
+  --space-lg: 20px;
+  --space-xl: 24px;
+  --space-2xl: 32px;
+  --space-3xl: 48px;
+  --page-padding-x: 16px;
+
+  /* 圆角 */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
+
+  /* 阴影 */
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.08);
+
+  /* 组件 */
+  --card-padding: 16px;
+  --card-margin: 12px;
+  --card-border-radius: 12px;
+  --button-height: 44px;
+
+  /* 安全区域 */
+  --safe-area-top: env(safe-area-inset-top);
+  --safe-area-bottom: env(safe-area-inset-bottom);
+}
+
+/* Toast 样式增强：让提示更醒目 */
+.van-toast--success {
+  background-color: #07C160 !important;
+}
+.van-toast--success .van-toast__icon .van-icon {
+  color: #fff !important;
+}
+.van-toast--success .van-toast__text {
+  color: #fff !important;
+}
+
+.van-toast--fail {
+  background-color: #EE0A24 !important;
+}
+.van-toast--fail .van-toast__icon .van-icon {
+  color: #fff !important;
+}
+.van-toast--fail .van-toast__text {
+  color: #fff !important;
+}
+
+.van-toast--loading .van-loading__text {
+  color: #fff !important;
+}

@@ -1,13 +1,17 @@
 package handler
 
 import (
+	"encoding/base64"
 	"fmt"
+	"math/rand"
 	"net/http"
+	"os"
 	"path/filepath"
 	"schedule-system-v2/backend/internal/auth"
 	"schedule-system-v2/backend/internal/model"
 	"schedule-system-v2/backend/internal/service"
 	"schedule-system-v2/backend/internal/utils"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -216,6 +220,84 @@ func (h *AvailabilityHandler) ImportFromXLS(c *gin.Context) {
 		}
 
 		// 批量插入新的无课时间
+		if err := h.service.CreateBatch(userID, availabilities); err != nil {
+			utils.Error(c, http.StatusInternalServerError, "保存无课时间失败: "+err.Error())
+			return
+		}
+	}
+
+	utils.Success(c, gin.H{
+		"imported": len(availabilities),
+		"message":  "XLS文件导入成功",
+	})
+}
+
+// ImportFromXLSBase64 通过base64编码的XLS文件导入课表
+func (h *AvailabilityHandler) ImportFromXLSBase64(c *gin.Context) {
+	userID := auth.GetUserIDFromContext(c)
+	if userID == 0 {
+		auth.ResponseUnauthorized(c)
+		return
+	}
+
+	var req struct {
+		Base64   string `json:"base64" binding:"required"`
+		FileName string `json:"fileName"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.Error(c, http.StatusBadRequest, "参数错误: "+err.Error())
+		return
+	}
+
+	fileName := req.FileName
+	if fileName == "" {
+		fileName = "schedule.xlsx"
+	}
+
+	ext := filepath.Ext(fileName)
+	if ext != ".xls" && ext != ".xlsx" {
+		utils.Error(c, http.StatusBadRequest, "只支持 .xls 或 .xlsx 文件")
+		return
+	}
+
+	// base64 解码
+	bytes, err := base64.StdEncoding.DecodeString(req.Base64)
+	if err != nil {
+		// 尝试 URL-safe base64
+		bytes, err = base64.RawStdEncoding.DecodeString(req.Base64)
+	}
+	if err != nil {
+		// 尝试无填充的标准 base64
+		bytes, err = base64.RawURLEncoding.DecodeString(req.Base64)
+	}
+	if err != nil {
+		utils.Error(c, http.StatusBadRequest, "base64解码失败: "+err.Error())
+		return
+	}
+
+	// 使用唯一临时文件名防止冲突
+	rand.Seed(time.Now().UnixNano())
+	tempPath := filepath.Join("/tmp", fmt.Sprintf("schedule_%d_%d%s", userID, rand.Intn(100000), ext))
+	if err := os.WriteFile(tempPath, bytes, 0644); err != nil {
+		utils.Error(c, http.StatusInternalServerError, "写入临时文件失败: "+err.Error())
+		return
+	}
+	defer os.Remove(tempPath)
+
+	// 解析XLS文件
+	parser := service.NewXLSParser()
+	availabilities, err := parser.ParseXLS(tempPath, userID)
+	if err != nil {
+		utils.Error(c, http.StatusInternalServerError, "解析XLS文件失败: "+err.Error())
+		return
+	}
+
+	// 保存到数据库
+	if len(availabilities) > 0 {
+		if err := h.service.DeleteByUserID(userID); err != nil {
+			utils.Error(c, http.StatusInternalServerError, "删除旧记录失败: "+err.Error())
+			return
+		}
 		if err := h.service.CreateBatch(userID, availabilities); err != nil {
 			utils.Error(c, http.StatusInternalServerError, "保存无课时间失败: "+err.Error())
 			return

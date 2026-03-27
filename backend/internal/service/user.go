@@ -273,11 +273,6 @@ func (s *UserService) ChangePassword(userID int, oldPassword, newPassword string
 		return errors.New("旧密码错误")
 	}
 
-	// 加密新密码
-	hashedPassword, err := utils.HashPassword(newPassword)
-	if err != nil {
-		return errors.New("密码加密失败")
-	}
-
-	return s.userDAO.UpdatePassword(userID, hashedPassword)
+	// DAO层会进行bcrypt加密，这里直接传明文
+	return s.userDAO.UpdatePassword(userID, newPassword)
 }

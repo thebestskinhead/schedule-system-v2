@@ -51,6 +51,17 @@ func (d *DutyDAO) GetByWeek(week int) ([]model.DutyRecordWithUser, error) {
 	return list, err
 }
 
+func (d *DutyDAO) GetByWeekAndDepartment(week int, department string) ([]model.DutyRecordWithUser, error) {
+	var list []model.DutyRecordWithUser
+	query := `SELECT dr.id, dr.week, dr.weekday, dr.period, dr.user_id, dr.assigned_by, dr.status, dr.remark, dr.created_at, dr.updated_at, u.student_id, u.name as user_name 
+		FROM duty_records dr 
+		JOIN users u ON dr.user_id = u.id 
+		WHERE dr.week = ? AND u.department = ? AND u.is_active = 1
+		ORDER BY dr.weekday, dr.period, u.id`
+	err := db.GetDB().Select(&list, query, week, department)
+	return list, err
+}
+
 func (d *DutyDAO) GetByUserID(userID int) ([]model.DutyRecordWithUser, error) {
 	var list []model.DutyRecordWithUser
 	query := `SELECT dr.id, dr.week, dr.weekday, dr.period, dr.user_id, dr.assigned_by, dr.status, dr.remark, dr.created_at, dr.updated_at, u.student_id, u.name as user_name 

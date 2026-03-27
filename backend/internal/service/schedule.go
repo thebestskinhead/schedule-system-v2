@@ -180,6 +180,10 @@ func (s *ScheduleService) GetScheduleByWeek(week int) ([]model.DutyRecordWithUse
 	return s.dutyDAO.GetByWeek(week)
 }
 
+func (s *ScheduleService) GetScheduleByWeekAndDepartment(week int, department string) ([]model.DutyRecordWithUser, error) {
+	return s.dutyDAO.GetByWeekAndDepartment(week, department)
+}
+
 func (s *ScheduleService) GetMyDuties(userID int) ([]model.DutyRecordWithUser, error) {
 	return s.dutyDAO.GetByUserID(userID)
 }

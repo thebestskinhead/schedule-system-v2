@@ -131,7 +131,8 @@ var PathPermissionMap = map[string]Permission{
 	// 无课表相关
 	"/api/v1/availability":               PermAvailabilityEdit,
 	"/api/v1/availability/import/cookie": PermAvailabilityImport,
-	"/api/v1/availability/import/xls":    PermAvailabilityImport,
+	"/api/v1/availability/import/xls":          PermAvailabilityImport,
+	"/api/v1/availability/import/xls-base64":   PermAvailabilityImport,
 	"/api/v1/admin/availability/all":     PermAvailabilityViewAll,
 
 	// 排班相关

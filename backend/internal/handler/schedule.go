@@ -66,17 +66,27 @@ func (h *ScheduleHandler) ConfirmSchedule(c *gin.Context) {
 
 func (h *ScheduleHandler) GetSchedule(c *gin.Context) {
 	weekStr := c.Query("week")
+	department := c.Query("department")
+
 	week, err := strconv.Atoi(weekStr)
 	if err != nil || week == 0 {
 		utils.Error(c, 400, "请提供周次")
 		return
 	}
 
-	records, err := h.service.GetScheduleByWeek(week)
+	var records []model.DutyRecordWithUser
+	if department != "" {
+		records, err = h.service.GetScheduleByWeekAndDepartment(week, department)
+	} else {
+		records, err = h.service.GetScheduleByWeek(week)
+	}
+
 	if err != nil {
 		utils.Error(c, 500, err.Error())
 		return
 	}
+
+	// 直接返回 records 格式
 	utils.Success(c, records)
 }
 
