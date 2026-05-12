@@ -76,6 +76,7 @@ release/**/*.zip
 release/**/dist/
 release/**/schedule-server*
 release/**/排班系统*
+release/*
 
 # Windows release
 windows-release/
