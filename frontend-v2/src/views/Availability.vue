@@ -365,7 +365,7 @@ const handleCellClick = (week, weekday, period) => {
   showEditDialog.value = true
 }
 
-// 保存编辑
+// 保存编辑（异步任务模式）
 const handleSaveEdit = async () => {
   editLoading.value = true
   try {
@@ -373,23 +373,43 @@ const handleSaveEdit = async () => {
     const recordsToDelete = availabilityList.value.filter(
       item => item.weekday === editForm.weekday && item.period === editForm.period
     )
-    
+
     for (const record of recordsToDelete) {
       await deleteAvailability({ id: record.id })
     }
-    
-    // 添加新的记录
+
+    // 添加新的记录（异步任务模式）
     if (editForm.selectedWeeks.length > 0) {
-      await addAvailability({
+      const data = await addAvailability({
         weekday: editForm.weekday,
         period: editForm.period,
         weeks: editForm.selectedWeeks
       })
+
+      // 切换到导入中状态
+      isImporting.value = true
+      showEditDialog.value = false
+      await nextTick()
+
+      currentTask.value = {
+        id: data.task_id,
+        created_at: data.created_at,
+        ...data
+      }
+      taskStatus.value = data.status || 'pending'
+      taskProgress.value = 10
+      taskDetail.value = '任务已提交，正在保存...'
+
+      ElMessage.success('任务已提交，正在保存中...')
+
+      // 开始轮询任务状态
+      startStatusPolling()
+    } else {
+      // 没有选中的周次，直接刷新
+      ElMessage.success('保存成功')
+      showEditDialog.value = false
+      fetchData()
     }
-    
-    ElMessage.success('保存成功')
-    showEditDialog.value = false
-    fetchData()
   } catch (error) {
     ElMessage.error('保存失败: ' + (error.message || '未知错误'))
   } finally {
@@ -555,7 +575,7 @@ const handleFileChange = (uploadFile) => {
   selectedFile.value = uploadFile.raw
 }
 
-// XLS导入
+// XLS导入（异步任务模式）
 const handleXLSImport = async () => {
   if (!selectedFile.value) {
     ElMessage.warning('请先选择文件')
@@ -565,17 +585,25 @@ const handleXLSImport = async () => {
   xlsLoading.value = true
   try {
     const data = await importFromXLS(selectedFile.value)
-    Object.assign(importResult, {
-      success: true,
-      message: data.message || '导入成功',
-      imported: data.imported || 0
-    })
+
+    // 切换到导入中状态
+    isImporting.value = true
     showXLSUpload.value = false
-    showImportResult.value = true
-    selectedFile.value = null
-    uploadRef.value?.clearFiles()
-    fetchData()
-    ElMessage.success('导入成功')
+    await nextTick()
+
+    currentTask.value = {
+      id: data.task_id,
+      created_at: data.created_at,
+      ...data
+    }
+    taskStatus.value = data.status || 'pending'
+    taskProgress.value = 10
+    taskDetail.value = '任务已提交，正在排队中...'
+
+    ElMessage.success('任务已提交，正在导入中...')
+
+    // 开始轮询任务状态
+    startStatusPolling()
   } catch (error) {
     Object.assign(importResult, {
       success: false,
@@ -585,6 +613,8 @@ const handleXLSImport = async () => {
     showImportResult.value = true
   } finally {
     xlsLoading.value = false
+    selectedFile.value = null
+    uploadRef.value?.clearFiles()
   }
 }
 

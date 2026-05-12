@@ -115,3 +115,14 @@ func (d *AvailabilityDAO) Exists(userID, week, weekday, period int) (bool, error
 	err := db.GetDB().Get(&count, query, userID, week, weekday, period)
 	return count > 0, err
 }
+
+// GetAvailabilityMatrix 拉取某周某部门的可用性矩阵
+func (d *AvailabilityDAO) GetAvailabilityMatrix(week int, department string) ([]model.AvailabilityMatrixItem, error) {
+	var items []model.AvailabilityMatrixItem
+	query := `SELECT a.user_id, a.weekday, a.period 
+		FROM availability a 
+		JOIN users u ON a.user_id = u.id 
+		WHERE a.week = ? AND u.department = ? AND u.is_active = 1 AND u.dept_role != 'dept_admin'`
+	err := db.GetDB().Select(&items, query, week, department)
+	return items, err
+}

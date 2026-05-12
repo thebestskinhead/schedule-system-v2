@@ -203,7 +203,7 @@ func (s *ApplicationService) GetApplicationDetail(ctx context.Context, appID int
 	return app, nil
 }
 
-// ProcessApproval 处理审批
+// ProcessApproval 处理审批（使用乐观锁防止并发问题）
 func (s *ApplicationService) ProcessApproval(ctx context.Context, appID, approverID int, action model.ApprovalAction, comment string) error {
 	// 获取申请
 	app, err := s.applicationDao.GetByID(ctx, appID)
@@ -211,7 +211,7 @@ func (s *ApplicationService) ProcessApproval(ctx context.Context, appID, approve
 		return err
 	}
 
-	// 检查状态
+	// 检查状态（乐观锁检查点1）
 	if app.Status != model.ApplicationStatusPending && app.Status != model.ApplicationStatusProcessing {
 		return fmt.Errorf("申请当前状态不可审批")
 	}
@@ -251,7 +251,7 @@ func (s *ApplicationService) ProcessApproval(ctx context.Context, appID, approve
 	case model.ApprovalActionApprove:
 		// 是否还有下一级审批
 		if app.CurrentLevel < app.TotalLevels {
-			// 进入下一级
+			// 进入下一级，使用乐观锁更新
 			app.CurrentLevel++
 			app.Status = model.ApplicationStatusProcessing
 			app.UpdatedAt = now
@@ -266,11 +266,13 @@ func (s *ApplicationService) ProcessApproval(ctx context.Context, appID, approve
 			}
 			go s.notifyApprovers(nextApprovers, app)
 		} else {
-			// 最终批准
-			app.Status = model.ApplicationStatusApproved
-			app.UpdatedAt = now
-			if err := s.applicationDao.Update(ctx, app); err != nil {
+			// 最终批准，使用乐观锁检查
+			success, err := s.applicationDao.UpdateStatusWithCheck(ctx, appID, app.Status, model.ApplicationStatusApproved)
+			if err != nil {
 				return err
+			}
+			if !success {
+				return fmt.Errorf("申请状态已变更，请刷新后重试")
 			}
 
 			// 执行批准回调
@@ -280,10 +282,13 @@ func (s *ApplicationService) ProcessApproval(ctx context.Context, appID, approve
 		}
 
 	case model.ApprovalActionReject:
-		app.Status = model.ApplicationStatusRejected
-		app.UpdatedAt = now
-		if err := s.applicationDao.Update(ctx, app); err != nil {
+		// 拒绝，使用乐观锁更新
+		success, err := s.applicationDao.UpdateStatusWithCheck(ctx, appID, app.Status, model.ApplicationStatusRejected)
+		if err != nil {
 			return err
+		}
+		if !success {
+			return fmt.Errorf("申请状态已变更，请刷新后重试")
 		}
 
 		// 执行拒绝回调
@@ -398,7 +403,7 @@ func (s *ApplicationService) canApprove(ctx context.Context, app *model.Applicat
 	}
 }
 
-// CancelApplication 取消申请
+// CancelApplication 取消申请（使用乐观锁防止并发问题）
 func (s *ApplicationService) CancelApplication(ctx context.Context, appID, userID int) error {
 	app, err := s.applicationDao.GetByID(ctx, appID)
 	if err != nil {
@@ -410,14 +415,22 @@ func (s *ApplicationService) CancelApplication(ctx context.Context, appID, userI
 		return fmt.Errorf("只能取消自己的申请")
 	}
 
-	// 只能取消待审批的申请
+	// 只能取消待审批的申请（乐观锁：检查状态）
 	if app.Status != model.ApplicationStatusPending {
 		return fmt.Errorf("只能取消待审批的申请")
 	}
 
-	app.Status = model.ApplicationStatusWithdrawn
-	app.UpdatedAt = time.Now()
-	return s.applicationDao.Update(ctx, app)
+	// 使用乐观锁更新状态：只有状态仍为 Pending 时才更新
+	success, err := s.applicationDao.UpdateStatusWithCheck(ctx, appID, model.ApplicationStatusPending, model.ApplicationStatusWithdrawn)
+	if err != nil {
+		return err
+	}
+	if !success {
+		// 状态已被其他操作修改，说明申请已被处理
+		return fmt.Errorf("申请已被处理，无法撤回")
+	}
+
+	return nil
 }
 
 // GetApplicationTypes 获取所有申请类型

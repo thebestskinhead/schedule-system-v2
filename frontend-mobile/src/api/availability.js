@@ -13,3 +13,4 @@ export const importFromXLS = (file) => {
 export const importFromXLSBase64 = (base64, fileName) => {
   return request.post('/availability/import/xls-base64', { base64, fileName })
 }
+export const getImportStatus = (taskId) => request.get('/availability/import/status', { params: { task_id: taskId } })

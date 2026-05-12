@@ -178,6 +178,21 @@ func (d *ApplicationDao) Update(ctx context.Context, app *model.Application) err
 	return err
 }
 
+// UpdateStatusWithCheck 乐观锁更新状态（防止并发问题）
+// 只有当前状态为期望值时才更新，返回是否成功
+func (d *ApplicationDao) UpdateStatusWithCheck(ctx context.Context, appID int, expectedStatus, newStatus model.ApplicationStatus) (bool, error) {
+	query := `UPDATE applications SET status = ?, updated_at = ? WHERE id = ? AND status = ?`
+	result, err := db.GetDB().Exec(query, newStatus, time.Now(), appID, expectedStatus)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected > 0, nil
+}
+
 // IsApproverForApplication 检查用户是否可以审批某个申请
 func (d *ApplicationDao) IsApproverForApplication(ctx context.Context, appID, userID int) (bool, error) {
 	// 获取申请信息

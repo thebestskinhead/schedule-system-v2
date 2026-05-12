@@ -38,11 +38,20 @@ func (h *AvailabilityHandler) AddAvailability(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.AddAvailability(userID, &req); err != nil {
-		utils.Error(c, 500, err.Error())
+	// 提交到任务队列
+	queue := service.GetTaskQueue()
+	task, err := queue.SubmitManualTask(userID, req.Weekday, req.Period, req.Weeks)
+	if err != nil {
+		utils.Error(c, http.StatusTooManyRequests, err.Error())
 		return
 	}
-	utils.Success(c, nil)
+
+	utils.Success(c, gin.H{
+		"task_id":    task.ID,
+		"status":     task.Status,
+		"message":    "任务已提交，请通过任务ID查询进度",
+		"created_at": task.CreatedAt,
+	})
 }
 
 func (h *AvailabilityHandler) GetMyAvailability(c *gin.Context) {
@@ -174,7 +183,7 @@ func (h *AvailabilityHandler) GetImportTaskList(c *gin.Context) {
 	})
 }
 
-// ImportFromXLS 从XLS文件导入课表
+// ImportFromXLS 从XLS文件导入课表（异步队列模式）
 func (h *AvailabilityHandler) ImportFromXLS(c *gin.Context) {
 	userID := auth.GetUserIDFromContext(c)
 	if userID == 0 {
@@ -196,43 +205,32 @@ func (h *AvailabilityHandler) ImportFromXLS(c *gin.Context) {
 		return
 	}
 
-	// 保存临时文件
-	tempPath := filepath.Join("/tmp", fmt.Sprintf("schedule_%d%s", userID, ext))
+	// 保存临时文件（使用唯一文件名）
+	rand.Seed(time.Now().UnixNano())
+	tempPath := filepath.Join("/tmp", fmt.Sprintf("schedule_%d_%d%s", userID, rand.Intn(100000), ext))
 	if err := c.SaveUploadedFile(file, tempPath); err != nil {
 		utils.Error(c, http.StatusInternalServerError, "保存文件失败: "+err.Error())
 		return
 	}
 
-	// 解析XLS文件
-	parser := service.NewXLSParser()
-	availabilities, err := parser.ParseXLS(tempPath, userID)
+	// 提交到任务队列
+	queue := service.GetTaskQueue()
+	task, err := queue.SubmitExcelTask(userID, tempPath)
 	if err != nil {
-		utils.Error(c, http.StatusInternalServerError, "解析XLS文件失败: "+err.Error())
+		os.Remove(tempPath) // 提交失败则删除临时文件
+		utils.Error(c, http.StatusTooManyRequests, err.Error())
 		return
 	}
 
-	// 保存到数据库
-	if len(availabilities) > 0 {
-		// 先删除该用户原有的无课时间记录
-		if err := h.service.DeleteByUserID(userID); err != nil {
-			utils.Error(c, http.StatusInternalServerError, "删除旧记录失败: "+err.Error())
-			return
-		}
-
-		// 批量插入新的无课时间
-		if err := h.service.CreateBatch(userID, availabilities); err != nil {
-			utils.Error(c, http.StatusInternalServerError, "保存无课时间失败: "+err.Error())
-			return
-		}
-	}
-
 	utils.Success(c, gin.H{
-		"imported": len(availabilities),
-		"message":  "XLS文件导入成功",
+		"task_id":    task.ID,
+		"status":     task.Status,
+		"message":    "任务已提交，请通过任务ID查询进度",
+		"created_at": task.CreatedAt,
 	})
 }
 
-// ImportFromXLSBase64 通过base64编码的XLS文件导入课表
+// ImportFromXLSBase64 通过base64编码的XLS文件导入课表（异步队列模式）
 func (h *AvailabilityHandler) ImportFromXLSBase64(c *gin.Context) {
 	userID := auth.GetUserIDFromContext(c)
 	if userID == 0 {
@@ -263,11 +261,9 @@ func (h *AvailabilityHandler) ImportFromXLSBase64(c *gin.Context) {
 	// base64 解码
 	bytes, err := base64.StdEncoding.DecodeString(req.Base64)
 	if err != nil {
-		// 尝试 URL-safe base64
 		bytes, err = base64.RawStdEncoding.DecodeString(req.Base64)
 	}
 	if err != nil {
-		// 尝试无填充的标准 base64
 		bytes, err = base64.RawURLEncoding.DecodeString(req.Base64)
 	}
 	if err != nil {
@@ -282,30 +278,20 @@ func (h *AvailabilityHandler) ImportFromXLSBase64(c *gin.Context) {
 		utils.Error(c, http.StatusInternalServerError, "写入临时文件失败: "+err.Error())
 		return
 	}
-	defer os.Remove(tempPath)
 
-	// 解析XLS文件
-	parser := service.NewXLSParser()
-	availabilities, err := parser.ParseXLS(tempPath, userID)
+	// 提交到任务队列
+	queue := service.GetTaskQueue()
+	task, err := queue.SubmitExcelTask(userID, tempPath)
 	if err != nil {
-		utils.Error(c, http.StatusInternalServerError, "解析XLS文件失败: "+err.Error())
+		os.Remove(tempPath)
+		utils.Error(c, http.StatusTooManyRequests, err.Error())
 		return
 	}
 
-	// 保存到数据库
-	if len(availabilities) > 0 {
-		if err := h.service.DeleteByUserID(userID); err != nil {
-			utils.Error(c, http.StatusInternalServerError, "删除旧记录失败: "+err.Error())
-			return
-		}
-		if err := h.service.CreateBatch(userID, availabilities); err != nil {
-			utils.Error(c, http.StatusInternalServerError, "保存无课时间失败: "+err.Error())
-			return
-		}
-	}
-
 	utils.Success(c, gin.H{
-		"imported": len(availabilities),
-		"message":  "XLS文件导入成功",
+		"task_id":    task.ID,
+		"status":     task.Status,
+		"message":    "任务已提交，请通过任务ID查询进度",
+		"created_at": task.CreatedAt,
 	})
 }

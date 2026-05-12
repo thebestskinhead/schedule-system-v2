@@ -133,6 +133,23 @@ func (d *UserDAO) SetDepartment(userID int, dept string) error {
 	return err
 }
 
+// GetUsersByIDs 按ID批量获取用户
+func (d *UserDAO) GetUsersByIDs(userIDs []int) ([]model.User, error) {
+	if len(userIDs) == 0 {
+		return []model.User{}, nil
+	}
+	query, args, err := sqlx.In(`SELECT id, student_id, name, email, role, department, dept_role, is_active, created_at FROM users WHERE id IN (?) AND is_active = 1`, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	query = db.GetDB().Rebind(query)
+	var users []model.User
+	if err := db.GetDB().Select(&users, query, args...); err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
 // ListByDepartment 按部门获取用户列表
 func (d *UserDAO) ListByDepartment(dept string) ([]model.User, error) {
 	var users []model.User

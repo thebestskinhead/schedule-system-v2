@@ -76,10 +76,10 @@ CREATE TABLE IF NOT EXISTS duty_counters (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB COMMENT='值班次数统计';
 
--- 排班设置表
+-- 排班设置表（全局唯一配置）
 CREATE TABLE IF NOT EXISTS schedule_settings (
     id INT PRIMARY KEY AUTO_INCREMENT,
-    admin_id INT NOT NULL UNIQUE,
+    admin_id INT DEFAULT 1 COMMENT '最后修改者ID',
     current_week INT DEFAULT 1 COMMENT '当前周次',
     auto_increment TINYINT(1) DEFAULT 0 COMMENT '是否自动递增周次',
     need_per_cell INT DEFAULT 2,
@@ -89,7 +89,8 @@ CREATE TABLE IF NOT EXISTS schedule_settings (
     export_title VARCHAR(255) DEFAULT '第{week}周排班表',
     semester_start_date DATE DEFAULT NULL COMMENT '学期起始日',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_admin_id (admin_id)
 ) ENGINE=InnoDB COMMENT='排班设置表';
 
 -- 导出模板表

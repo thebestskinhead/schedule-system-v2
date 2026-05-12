@@ -162,3 +162,17 @@ type SemesterStartDateResponse struct {
 	SemesterStartDate string `json:"semester_start_date"`
 	CurrentWeek       int    `json:"current_week"`
 }
+
+// AvailabilityMatrixItem 可用性矩阵单项
+type AvailabilityMatrixItem struct {
+	UserID  int `db:"user_id" json:"user_id"`
+	Weekday int `db:"weekday" json:"weekday"`
+	Period  int `db:"period" json:"period"`
+}
+
+// UserDutyCounts 用户排班计数聚合
+type UserDutyCounts struct {
+	Total   map[int]int64            // user_id -> 全历史次数
+	ByWeek  map[int]int64            // user_id -> 本周次数
+	ByDay   map[int]map[int]int64    // user_id -> weekday -> 当天次数
+}

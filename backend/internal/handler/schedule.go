@@ -125,12 +125,7 @@ func (h *ScheduleHandler) UpdateDutyStatus(c *gin.Context) {
 
 // GetScheduleSettings 获取排班设置
 func (h *ScheduleHandler) GetScheduleSettings(c *gin.Context) {
-	adminID := auth.GetUserIDFromContext(c)
-	if adminID == 0 {
-		auth.ResponseUnauthorized(c)
-		return
-	}
-	settings, err := h.service.GetScheduleSettings(adminID)
+	settings, err := h.service.GetScheduleSettings()
 	if err != nil {
 		// 返回默认设置
 		utils.Success(c, model.ScheduleSettings{

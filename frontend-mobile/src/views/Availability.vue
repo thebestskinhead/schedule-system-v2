@@ -180,13 +180,30 @@
         <p class="import-loading-text">{{ nativeImportText }}</p>
       </div>
     </van-overlay>
+
+    <!-- 异步任务状态弹窗 -->
+    <van-dialog
+      v-model:show="isImporting"
+      title="正在处理"
+      :show-confirm-button="false"
+      close-on-click-overlay
+    >
+      <div class="task-status-content">
+        <van-progress :percentage="taskProgress" :status="taskStatus === 'failed' ? 'exception' : ''" />
+        <van-tag :type="taskStatus === 'completed' ? 'success' : taskStatus === 'failed' ? 'danger' : taskStatus === 'running' ? 'warning' : 'default'" size="large">
+          {{ taskStatus === 'pending' ? '排队中' : taskStatus === 'running' ? '处理中' : taskStatus === 'completed' ? '已完成' : '失败' }}
+        </van-tag>
+        <p class="task-detail-text">{{ taskDetail }}</p>
+        <van-button size="small" @click="cancelImport">取消等待</van-button>
+      </div>
+    </van-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { showToast } from 'vant'
-import { getMyAvailability, addAvailability, deleteAvailability, importFromXLS, importFromXLSBase64 } from '../api/availability'
+import { getMyAvailability, addAvailability, deleteAvailability, importFromXLS, importFromXLSBase64, getImportStatus } from '../api/availability'
 import { getCurrentWeek } from '../api/schedule'
 import { isNativeAvailable, fetchScheduleFromSchool, setLoginCallbacks } from '../utils/native'
 
@@ -196,6 +213,14 @@ const isNative = isNativeAvailable()
 const nativeImporting = ref(false)
 const nativeImportText = ref('正在获取课表...')
 const waitingForLogin = ref(false)
+
+// 异步任务相关
+const isImporting = ref(false)
+const currentTask = ref(null)
+const taskStatus = ref('')
+const taskProgress = ref(0)
+const taskDetail = ref('')
+let statusPollTimer = null
 
 const loading = ref(false)
 const availabilityList = ref([])
@@ -309,22 +334,39 @@ const handleSaveEdit = async () => {
     const recordsToDelete = availabilityList.value.filter(
       item => item.weekday === editForm.weekday && item.period === editForm.period
     )
-    
+
     for (const record of recordsToDelete) {
       await deleteAvailability({ id: record.id })
     }
-    
+
     if (editForm.selectedWeeks.length > 0) {
-      await addAvailability({
+      const data = await addAvailability({
         weekday: editForm.weekday,
         period: editForm.period,
         weeks: editForm.selectedWeeks
       })
+
+      // 切换到导入中状态
+      isImporting.value = true
+      showEditDialog.value = false
+      await nextTick()
+
+      currentTask.value = {
+        id: data.task_id,
+        created_at: data.created_at,
+        ...data
+      }
+      taskStatus.value = data.status || 'pending'
+      taskProgress.value = 10
+      taskDetail.value = '任务已提交，正在保存...'
+
+      showToast({ message: '任务已提交', type: 'success' })
+      startStatusPolling()
+    } else {
+      showToast({ message: '保存成功', type: 'success' })
+      showEditDialog.value = false
+      fetchData()
     }
-    
-    showToast({ message: '保存成功', type: 'success' })
-    showEditDialog.value = false
-    fetchData()
   } catch (error) {
     showToast({ message: '保存失败: ' + (error.message || '未知错误'), type: 'fail' })
   } finally {
@@ -334,6 +376,98 @@ const handleSaveEdit = async () => {
 
 const handleClearAll = () => {
   editForm.selectedWeeks = []
+}
+
+// 开始轮询任务状态
+const startStatusPolling = () => {
+  setTimeout(() => {
+    checkTaskStatus()
+  }, 1000)
+  statusPollTimer = setInterval(() => {
+    checkTaskStatus()
+  }, 2000)
+}
+
+// 检查任务状态
+const checkTaskStatus = async () => {
+  if (!currentTask.value?.id) {
+    clearInterval(statusPollTimer)
+    return
+  }
+
+  try {
+    const data = await getImportStatus(currentTask.value.id)
+    currentTask.value = data
+    taskStatus.value = data.status || 'pending'
+
+    if (data.status === 'pending') {
+      taskProgress.value = 10
+      taskDetail.value = '任务排队中，请稍候...'
+    } else if (data.status === 'running') {
+      taskProgress.value = 50
+      taskDetail.value = '正在处理...'
+    } else if (data.status === 'completed') {
+      taskProgress.value = 100
+      taskDetail.value = '处理完成！'
+      handleImportComplete(data)
+    } else if (data.status === 'failed') {
+      taskDetail.value = data.error || '处理失败'
+      handleImportFailed(data)
+    }
+  } catch (error) {
+    console.error('查询任务状态失败:', error)
+  }
+}
+
+// 处理导入完成
+const handleImportComplete = (data) => {
+  clearInterval(statusPollTimer)
+  isImporting.value = false
+  nativeImporting.value = false
+
+  Object.assign(importResult, {
+    success: true,
+    message: '操作成功',
+    weeks_parsed: data.result?.weeks_parsed || 0,
+    total_cells: data.result?.total_cells || 0,
+    available_cells: data.result?.available_cells || 0,
+    imported: data.result?.imported || 0
+  })
+
+  showImportResult.value = true
+  fetchData()
+  showToast({ message: `成功导入 ${data.result?.imported || 0} 条数据`, type: 'success' })
+}
+
+// 处理导入失败
+const handleImportFailed = (data) => {
+  clearInterval(statusPollTimer)
+  isImporting.value = false
+  nativeImporting.value = false
+
+  Object.assign(importResult, {
+    success: false,
+    message: data.error || '操作失败',
+    weeks_parsed: 0,
+    total_cells: 0,
+    available_cells: 0,
+    imported: 0
+  })
+
+  showImportResult.value = true
+  showToast({ message: data.error || '操作失败', type: 'fail' })
+}
+
+// 取消导入
+const cancelImport = () => {
+  clearInterval(statusPollTimer)
+  isImporting.value = false
+  nativeImporting.value = false
+  currentTask.value = null
+  taskStatus.value = ''
+  taskProgress.value = 0
+  taskDetail.value = ''
+  showToast({ message: '已取消', type: 'default' })
 }
 
 const fetchData = async () => {
@@ -374,17 +508,23 @@ const handleXLSImport = async () => {
   xlsLoading.value = true
   try {
     const data = await importFromXLS(selectedFile.value)
-    Object.assign(importResult, {
-      success: true,
-      message: data.message || '导入成功',
-      imported: data.imported || 0
-    })
+
+    // 切换到导入中状态
+    isImporting.value = true
     showXLSUpload.value = false
-    showImportResult.value = true
-    fileList.value = []
-    selectedFile.value = null
-    fetchData()
-    showToast({ message: '导入成功', type: 'success' })
+    await nextTick()
+
+    currentTask.value = {
+      id: data.task_id,
+      created_at: data.created_at,
+      ...data
+    }
+    taskStatus.value = data.status || 'pending'
+    taskProgress.value = 10
+    taskDetail.value = '任务已提交，正在导入...'
+
+    showToast({ message: '任务已提交', type: 'success' })
+    startStatusPolling()
   } catch (error) {
     Object.assign(importResult, {
       success: false,
@@ -394,6 +534,8 @@ const handleXLSImport = async () => {
     showImportResult.value = true
   } finally {
     xlsLoading.value = false
+    fileList.value = []
+    selectedFile.value = null
   }
 }
 
@@ -461,18 +603,26 @@ const onLoginFailed = (errorMessage) => {
   showToast({ message: '登录失败: ' + errorMessage, type: 'fail' })
 }
 
-// 执行导入
+// 执行导入（异步任务模式）
 const doImport = async (base64, fileName) => {
   try {
     const data = await importFromXLSBase64(base64, fileName)
-    Object.assign(importResult, {
-      success: true,
-      message: data.message || '导入成功',
-      imported: data.imported || 0
-    })
-    showImportResult.value = true
-    fetchData()
-    showToast({ message: `导入完成，共导入 ${data.imported || 0} 条数据`, type: 'success' })
+
+    // 切换到导入中状态
+    isImporting.value = true
+    await nextTick()
+
+    currentTask.value = {
+      id: data.task_id,
+      created_at: data.created_at,
+      ...data
+    }
+    taskStatus.value = data.status || 'pending'
+    taskProgress.value = 10
+    taskDetail.value = '任务已提交，正在导入...'
+
+    showToast({ message: '任务已提交', type: 'success' })
+    startStatusPolling()
   } catch (error) {
     Object.assign(importResult, {
       success: false,
@@ -480,7 +630,6 @@ const doImport = async (base64, fileName) => {
       imported: 0
     })
     showImportResult.value = true
-  } finally {
     nativeImporting.value = false
   }
 }
@@ -488,10 +637,17 @@ const doImport = async (base64, fileName) => {
 onMounted(() => {
   fetchData()
   fetchCurrentWeek()
-  
+
   // 设置登录回调（安卓端登录完成后会调用）
   if (isNative) {
     setLoginCallbacks(onLoginComplete, onLoginFailed)
+  }
+})
+
+// 组件卸载时清理定时器
+onUnmounted(() => {
+  if (statusPollTimer) {
+    clearInterval(statusPollTimer)
   }
 })
 </script>
@@ -777,6 +933,26 @@ onMounted(() => {
 
 .import-loading-text {
   margin-top: 16px;
+  font-size: 14px;
+  color: #646566;
+}
+
+/* 异步任务状态 */
+.task-status-content {
+  padding: 20px;
+  text-align: center;
+}
+
+.task-status-content .van-progress {
+  margin-bottom: 16px;
+}
+
+.task-status-content .van-tag {
+  margin-bottom: 12px;
+}
+
+.task-detail-text {
+  margin: 12px 0;
   font-size: 14px;
   color: #646566;
 }
