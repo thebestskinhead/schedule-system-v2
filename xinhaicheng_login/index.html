@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>雨樱 · 登录</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --glass-bg: rgba(255, 255, 255, 0.12);
+            --glass-border: rgba(255, 255, 255, 0.35);
+            --glass-shadow: rgba(0, 0, 0, 0.2);
+            --text-primary: rgba(255, 255, 255, 0.95);
+            --text-secondary: rgba(255, 255, 255, 0.7);
+            --accent: rgba(255, 255, 255, 0.9);
+            --input-bg: rgba(0, 0, 0, 0.15);
+        }
+
+        body {
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+            position: relative;
+        }
+
+        /* 背景图层 */
+        .bg-layer {
+            position: fixed;
+            inset: 0;
+            z-index: 0;
+            background-size: cover;
+            background-position: center;
+            transition: transform 0.3s ease-out;
+        }
+
+        @media (min-width: 769px) {
+            .bg-layer {
+                background-image: url('./bg-pc.png');
+            }
+        }
+
+        @media (max-width: 768px) {
+            .bg-layer {
+                background-image: url('./bg-mobile.png');
+            }
+        }
+
+        .vignette {
+            position: fixed;
+            inset: 0;
+            z-index: 1;
+            background: radial-gradient(ellipse at center, transparent 0%, rgba(0,0,0,0.15) 100%);
+            pointer-events: none;
+        }
+
+        #rain-canvas {
+            position: fixed;
+            inset: 0;
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        /* 主容器 */
+        .container {
+            position: relative;
+            z-index: 10;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            padding: 20px;
+        }
+
+        @media (min-width: 769px) {
+            .container {
+                justify-content: flex-start;
+                padding-left: 12%;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                justify-content: center;
+            }
+        }
+
+        /* 卡片基础 */
+        .auth-card {
+            width: 420px;
+            padding: 48px 40px;
+            border-radius: 24px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            box-shadow: 
+                0 8px 32px 0 var(--glass-shadow),
+                inset 0 0 0 1px rgba(255,255,255,0.1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        @media (max-width: 768px) {
+            .auth-card {
+                width: 90%;
+                max-width: 400px;
+                padding: 40px 32px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .auth-card {
+                padding: 36px 28px;
+            }
+        }
+
+        /* 视图切换动画 */
+        .view-section {
+            display: none;
+            animation: viewEnter 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+        }
+
+        .view-section.active {
+            display: block;
+        }
+
+        @keyframes viewEnter {
+            from {
+                opacity: 0;
+                transform: translateY(20px) scale(0.98);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        /* 初始加载动画 */
+        .auth-card.initial-load {
+            animation: cardEnter 1s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+        }
+
+        @keyframes cardEnter {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* 标题区 */
+        .brand {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .brand h1 {
+            font-size: 32px;
+            font-weight: 300;
+            color: var(--text-primary);
+            letter-spacing: 8px;
+            text-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            margin-bottom: 8px;
+        }
+
+        .brand p {
+            font-size: 14px;
+            color: var(--text-secondary);
+            letter-spacing: 2px;
+            text-shadow: 0 1px 4px rgba(0,0,0,0.1);
+        }
+
+        @media (max-width: 480px) {
+            .brand h1 {
+                font-size: 26px;
+                letter-spacing: 6px;
+            }
+        }
+
+        /* 表单 */
+        .form-group {
+            margin-bottom: 22px;
+            opacity: 0;
+            animation: fadeUp 0.6s ease-out forwards;
+        }
+
+        .form-group:nth-child(1) { animation-delay: 0.1s; }
+        .form-group:nth-child(2) { animation-delay: 0.2s; }
+        .form-group:nth-child(3) { animation-delay: 0.3s; }
+        .form-group:nth-child(4) { animation-delay: 0.4s; }
+
+        @keyframes fadeUp {
+            from {
+                opacity: 0;
+                transform: translateY(12px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .form-label {
+            display: block;
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            letter-spacing: 1px;
+            transition: color 0.3s;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 14px 18px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.25);
+            background: var(--input-bg);
+            color: var(--text-primary);
+            font-size: 15px;
+            outline: none;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(4px);
+            font-family: inherit;
+        }
+
+        .form-input::placeholder {
+            color: rgba(255,255,255,0.4);
+        }
+
+        .form-input:focus {
+            border-color: rgba(255,255,255,0.7);
+            background: rgba(0,0,0,0.25);
+            box-shadow: 0 0 20px rgba(255,255,255,0.15), inset 0 0 0 1px rgba(255,255,255,0.1);
+        }
+
+        .form-group:focus-within .form-label {
+            color: var(--text-primary);
+        }
+
+        /* 验证码行 */
+        .verify-row {
+            display: flex;
+            gap: 12px;
+        }
+
+        .verify-row .form-input {
+            flex: 1;
+        }
+
+        .btn-verify {
+            padding: 0 20px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.4);
+            background: rgba(255,255,255,0.15);
+            color: var(--text-primary);
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+            font-family: inherit;
+            letter-spacing: 1px;
+        }
+
+        .btn-verify:hover {
+            background: rgba(255,255,255,0.25);
+            border-color: rgba(255,255,255,0.7);
+        }
+
+        .btn-verify:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* 选项行 */
+        .options {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 28px;
+            font-size: 13px;
+            opacity: 0;
+            animation: fadeUp 0.6s ease-out 0.3s forwards;
+        }
+
+        .remember {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: color 0.3s;
+        }
+
+        .remember:hover {
+            color: var(--text-primary);
+        }
+
+        .remember input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            accent-color: rgba(255,255,255,0.8);
+            cursor: pointer;
+        }
+
+        /* 文字链接 */
+        .text-link {
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: all 0.3s;
+            position: relative;
+            background: none;
+            border: none;
+            font-size: 13px;
+            cursor: pointer;
+            font-family: inherit;
+            padding: 0;
+        }
+
+        .text-link::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            width: 0;
+            height: 1px;
+            background: rgba(255,255,255,0.6);
+            transition: width 0.3s;
+        }
+
+        .text-link:hover {
+            color: var(--text-primary);
+        }
+
+        .text-link:hover::after {
+            width: 100%;
+        }
+
+        /* 主按钮 */
+        .btn-primary {
+            width: 100%;
+            padding: 14px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.4);
+            background: rgba(255,255,255,0.15);
+            color: var(--text-primary);
+            font-size: 16px;
+            letter-spacing: 4px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+            font-family: inherit;
+            font-weight: 500;
+            opacity: 0;
+            animation: fadeUp 0.6s ease-out 0.4s forwards;
+        }
+
+        .btn-primary::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: rgba(255,255,255,0.2);
+            transform: translateX(-100%);
+            transition: transform 0.5s ease;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+            border-color: rgba(255,255,255,0.7);
+            background: rgba(255,255,255,0.25);
+        }
+
+        .btn-primary:hover::before {
+            transform: translateX(100%);
+        }
+
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+
+        /* 底部链接 */
+        .footer {
+            text-align: center;
+            margin-top: 28px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            opacity: 0;
+            animation: fadeUp 0.6s ease-out 0.5s forwards;
+        }
+
+        .footer a, .footer button {
+            color: var(--text-primary);
+            text-decoration: none;
+            font-weight: 500;
+            margin-left: 4px;
+            transition: opacity 0.3s;
+        }
+
+        .footer a:hover, .footer button:hover {
+            opacity: 0.8;
+        }
+
+        /* 返回箭头 */
+        .back-nav {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 20px;
+            color: var(--text-secondary);
+            font-size: 13px;
+            cursor: pointer;
+            transition: color 0.3s;
+            background: none;
+            border: none;
+            font-family: inherit;
+            padding: 0;
+            opacity: 0;
+            animation: fadeUp 0.4s ease-out forwards;
+        }
+
+        .back-nav:hover {
+            color: var(--text-primary);
+        }
+
+        .back-nav svg {
+            width: 16px;
+            height: 16px;
+            fill: currentColor;
+            transition: transform 0.3s;
+        }
+
+        .back-nav:hover svg {
+            transform: translateX(-3px);
+        }
+
+        /* 自动填充覆盖 */
+        input:-webkit-autofill,
+        input:-webkit-autofill:hover,
+        input:-webkit-autofill:focus {
+            -webkit-text-fill-color: var(--text-primary);
+            -webkit-box-shadow: 0 0 0px 1000px rgba(0,0,0,0.3) inset;
+            transition: background-color 5000s ease-in-out 0s;
+        }
+
+        /* 波纹动画 */
+        @keyframes ripple {
+            to { transform: scale(2); opacity: 0; }
+        }
+
+        /* 成功提示 */
+        .toast {
+            position: fixed;
+            top: 40px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-20px);
+            background: rgba(255,255,255,0.2);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.4);
+            color: var(--text-primary);
+            padding: 12px 28px;
+            border-radius: 50px;
+            font-size: 14px;
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.4s ease;
+            z-index: 100;
+            letter-spacing: 1px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="bg-layer"></div>
+    <div class="vignette"></div>
+    <canvas id="rain-canvas"></canvas>
+
+    <div class="container">
+        <div class="auth-card initial-load" id="authCard">
+
+            <!-- 登录视图 -->
+            <div class="view-section active" id="view-login">
+                <div class="brand">
+                    <h1>雨 樱</h1>
+                    <p>细雨轻拂 · 樱花入梦</p>
+                </div>
+                <form onsubmit="event.preventDefault(); handleLogin();">
+                    <div class="form-group">
+                        <label class="form-label">用户名</label>
+                        <input type="text" class="form-input" placeholder="请输入用户名 / 邮箱" id="login-user">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">密码</label>
+                        <input type="password" class="form-input" placeholder="请输入密码" id="login-pass">
+                    </div>
+                    <div class="options">
+                        <label class="remember">
+                            <input type="checkbox">
+                            <span>记住我</span>
+                        </label>
+                        <button type="button" class="text-link" onclick="switchView('forgot')">忘记密码？</button>
+                    </div>
+                    <button type="submit" class="btn-primary">登 录</button>
+                </form>
+                <div class="footer">
+                    还没有账号？<button class="text-link" onclick="switchView('register')" style="font-size:13px;">立即注册</button>
+                </div>
+            </div>
+
+            <!-- 注册视图 -->
+            <div class="view-section" id="view-register">
+                <button class="back-nav" onclick="switchView('login')">
+                    <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+                    返回登录
+                </button>
+                <div class="brand" style="margin-bottom:32px;">
+                    <h1 style="font-size:26px; letter-spacing:6px;">创建账号</h1>
+                    <p>开启你的雨樱之旅</p>
+                </div>
+                <form onsubmit="event.preventDefault(); handleRegister();">
+                    <div class="form-group">
+                        <label class="form-label">用户名</label>
+                        <input type="text" class="form-input" placeholder="设置用户名" id="reg-user">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">邮箱</label>
+                        <input type="email" class="form-input" placeholder="your@email.com" id="reg-email">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">密码</label>
+                        <input type="password" class="form-input" placeholder="设置密码（至少6位）" id="reg-pass">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">确认密码</label>
+                        <input type="password" class="form-input" placeholder="再次输入密码" id="reg-pass2">
+                    </div>
+                    <button type="submit" class="btn-primary" style="margin-top:8px;">注 册</button>
+                </form>
+                <div class="footer">
+                    已有账号？<button class="text-link" onclick="switchView('login')" style="font-size:13px;">直接登录</button>
+                </div>
+            </div>
+
+            <!-- 忘记密码视图 -->
+            <div class="view-section" id="view-forgot">
+                <button class="back-nav" onclick="switchView('login')">
+                    <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+                    返回登录
+                </button>
+                <div class="brand" style="margin-bottom:32px;">
+                    <h1 style="font-size:26px; letter-spacing:6px;">重置密码</h1>
+                    <p>验证身份后设置新密码</p>
+                </div>
+                <form onsubmit="event.preventDefault(); handleForgot();">
+                    <div class="form-group">
+                        <label class="form-label">注册邮箱</label>
+                        <input type="email" class="form-input" placeholder="请输入注册邮箱" id="forgot-email">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">验证码</label>
+                        <div class="verify-row">
+                            <input type="text" class="form-input" placeholder="6位验证码" maxlength="6" id="forgot-code">
+                            <button type="button" class="btn-verify" id="btn-send" onclick="sendCode()">获取验证码</button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">新密码</label>
+                        <input type="password" class="form-input" placeholder="设置新密码" id="forgot-pass">
+                    </div>
+                    <button type="submit" class="btn-primary" style="margin-top:8px;">确认重置</button>
+                </form>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- 提示条 -->
+    <div class="toast" id="toast"></div>
+
+    <script>
+        // ========== 视图切换 ==========
+        function switchView(viewName) {
+            const views = ['login', 'register', 'forgot'];
+            const card = document.getElementById('authCard');
+
+            card.classList.remove('initial-load');
+
+            views.forEach(v => {
+                const el = document.getElementById('view-' + v);
+                if (v === viewName) {
+                    el.classList.add('active');
+                    el.style.animation = 'none';
+                    el.offsetHeight;
+                    el.style.animation = '';
+                } else {
+                    el.classList.remove('active');
+                }
+            });
+        }
+
+        // ========== Toast 提示 ==========
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 2500);
+        }
+
+        // ========== 按钮波纹 ==========
+        function addRipple(e) {
+            const btn = e.currentTarget;
+            const ripple = document.createElement('span');
+            const rect = btn.getBoundingClientRect();
+            const size = Math.max(rect.width, rect.height);
+            const x = e.clientX - rect.left - size / 2;
+            const y = e.clientY - rect.top - size / 2;
+
+            ripple.style.cssText = `
+                position: absolute;
+                width: ${size}px;
+                height: ${size}px;
+                left: ${x}px;
+                top: ${y}px;
+                background: rgba(255,255,255,0.3);
+                border-radius: 50%;
+                transform: scale(0);
+                animation: ripple 0.6s ease-out;
+                pointer-events: none;
+            `;
+            btn.appendChild(ripple);
+            setTimeout(() => ripple.remove(), 600);
+        }
+
+        document.querySelectorAll('.btn-primary').forEach(btn => {
+            btn.addEventListener('click', addRipple);
+        });
+
+        // ========== 业务逻辑 ==========
+        function handleLogin() {
+            const user = document.getElementById('login-user').value;
+            const pass = document.getElementById('login-pass').value;
+            if (!user || !pass) {
+                showToast('请填写完整信息');
+                return;
+            }
+            showToast('登录成功，欢迎回来');
+        }
+
+        function handleRegister() {
+            const user = document.getElementById('reg-user').value;
+            const email = document.getElementById('reg-email').value;
+            const pass = document.getElementById('reg-pass').value;
+            const pass2 = document.getElementById('reg-pass2').value;
+
+            if (!user || !email || !pass || !pass2) {
+                showToast('请填写完整信息');
+                return;
+            }
+            if (pass !== pass2) {
+                showToast('两次密码输入不一致');
+                return;
+            }
+            if (pass.length < 6) {
+                showToast('密码长度至少6位');
+                return;
+            }
+            showToast('注册成功，请登录');
+            setTimeout(() => switchView('login'), 1200);
+        }
+
+        function sendCode() {
+            const email = document.getElementById('forgot-email').value;
+            if (!email) {
+                showToast('请先输入邮箱');
+                return;
+            }
+            const btn = document.getElementById('btn-send');
+            let count = 60;
+            btn.disabled = true;
+            btn.textContent = `${count}s`;
+
+            const timer = setInterval(() => {
+                count--;
+                if (count <= 0) {
+                    clearInterval(timer);
+                    btn.disabled = false;
+                    btn.textContent = '获取验证码';
+                } else {
+                    btn.textContent = `${count}s`;
+                }
+            }, 1000);
+
+            showToast('验证码已发送');
+        }
+
+        function handleForgot() {
+            const email = document.getElementById('forgot-email').value;
+            const code = document.getElementById('forgot-code').value;
+            const pass = document.getElementById('forgot-pass').value;
+
+            if (!email || !code || !pass) {
+                showToast('请填写完整信息');
+                return;
+            }
+            showToast('密码重置成功，请登录');
+            setTimeout(() => switchView('login'), 1200);
+        }
+
+        // ========== Canvas 雨幕 + 樱花 ==========
+        (function() {
+            const canvas = document.getElementById('rain-canvas');
+            const ctx = canvas.getContext('2d');
+            let width, height, dpr = window.devicePixelRatio || 1;
+
+            function resize() {
+                width = window.innerWidth;
+                height = window.innerHeight;
+                canvas.width = width * dpr;
+                canvas.height = height * dpr;
+                canvas.style.width = width + 'px';
+                canvas.style.height = height + 'px';
+                ctx.scale(dpr, dpr);
+            }
+            resize();
+            window.addEventListener('resize', resize);
+
+            // 雨滴
+            const rainCount = Math.min(width * 0.15, 180);
+            const rains = [];
+            class RainDrop {
+                constructor() {
+                    this.reset();
+                    this.y = Math.random() * height;
+                }
+                reset() {
+                    this.x = Math.random() * width;
+                    this.y = -50;
+                    this.length = Math.random() * 20 + 15;
+                    this.speed = Math.random() * 8 + 6;
+                    this.opacity = Math.random() * 0.3 + 0.1;
+                    this.angle = Math.random() * 0.2 + 0.1;
+                    this.width = Math.random() * 1.5 + 0.5;
+                }
+                update() {
+                    this.y += this.speed;
+                    this.x += this.angle;
+                    if (this.y > height + this.length) this.reset();
+                }
+                draw() {
+                    ctx.beginPath();
+                    ctx.moveTo(this.x, this.y);
+                    ctx.lineTo(this.x + this.angle * 2, this.y + this.length);
+                    ctx.strokeStyle = `rgba(200, 220, 255, ${this.opacity})`;
+                    ctx.lineWidth = this.width;
+                    ctx.lineCap = 'round';
+                    ctx.stroke();
+                }
+            }
+            for (let i = 0; i < rainCount; i++) rains.push(new RainDrop());
+
+            // 花瓣
+            const petals = [];
+            class Petal {
+                constructor() {
+                    this.reset();
+                    this.y = Math.random() * height;
+                }
+                reset() {
+                    this.x = Math.random() * width;
+                    this.y = -20;
+                    this.size = Math.random() * 6 + 3;
+                    this.speedY = Math.random() * 1.5 + 0.5;
+                    this.speedX = Math.random() * 1 - 0.5;
+                    this.rotation = Math.random() * 360;
+                    this.rotationSpeed = Math.random() * 2 - 1;
+                    this.opacity = Math.random() * 0.5 + 0.3;
+                    this.sway = Math.random() * 0.02 + 0.01;
+                    this.swayOffset = Math.random() * Math.PI * 2;
+                }
+                update(time) {
+                    this.y += this.speedY;
+                    this.x += this.speedX + Math.sin(time * this.sway + this.swayOffset) * 0.5;
+                    this.rotation += this.rotationSpeed;
+                    if (this.y > height + 20 || this.x < -20 || this.x > width + 20) this.reset();
+                }
+                draw() {
+                    ctx.save();
+                    ctx.translate(this.x, this.y);
+                    ctx.rotate(this.rotation * Math.PI / 180);
+                    ctx.fillStyle = `rgba(255, 220, 230, ${this.opacity})`;
+                    ctx.beginPath();
+                    ctx.ellipse(0, 0, this.size, this.size * 0.6, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                }
+            }
+            for (let i = 0; i < 25; i++) petals.push(new Petal());
+
+            let time = 0;
+            function animate() {
+                ctx.clearRect(0, 0, width, height);
+                time += 0.01;
+                rains.forEach(r => { r.update(); r.draw(); });
+                petals.forEach(p => { p.update(time); p.draw(); });
+                requestAnimationFrame(animate);
+            }
+            animate();
+
+            // 鼠标视差
+            const bg = document.querySelector('.bg-layer');
+            document.addEventListener('mousemove', (e) => {
+                const x = (e.clientX / width - 0.5) * 10;
+                const y = (e.clientY / height - 0.5) * 10;
+                bg.style.transform = `scale(1.05) translate(${-x}px, ${-y}px)`;
+            });
+        })();
+    </script>
+</body>
+</html>

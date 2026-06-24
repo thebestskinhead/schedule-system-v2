@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { showToast } from 'vant'
+import router from '../router'
 
 // API 基础 URL
 const API_BASE_URL = '/api/v1'
@@ -52,7 +53,7 @@ request.interceptors.response.use(
     showToast({ message, type: 'fail' })
     if (error.response?.status === 401) {
       localStorage.removeItem('token')
-      window.location.href = '/login'
+      router.push('/login')
     }
     return Promise.reject(error)
   }

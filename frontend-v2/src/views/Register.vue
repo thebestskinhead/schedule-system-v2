@@ -1,104 +1,102 @@
 <template>
-  <div class="auth-page">
-    <div class="auth-box">
-      <div class="auth-header">
-        <el-icon size="48" color="#409eff"><Calendar /></el-icon>
-        <h1>注册账号</h1>
-        <p>创建您的排班系统账户</p>
-      </div>
-      
-      <el-form :model="form" :rules="rules" ref="formRef" class="auth-form">
-        <el-form-item prop="student_id">
-          <el-input 
-            v-model="form.student_id" 
-            placeholder="学号"
-            size="large"
-            :prefix-icon="User"
-          />
-        </el-form-item>
-        
-        <el-form-item prop="name">
-          <el-input 
-            v-model="form.name" 
-            placeholder="姓名"
-            size="large"
-            :prefix-icon="UserFilled"
-          />
-        </el-form-item>
-        
-        <el-form-item prop="email">
-          <el-input 
-            v-model="form.email" 
-            placeholder="邮箱"
-            size="large"
-            :prefix-icon="Message"
-          />
-        </el-form-item>
-        
-        <el-form-item prop="password">
-          <el-input 
-            v-model="form.password" 
-            type="password" 
-            placeholder="密码"
-            size="large"
-            :prefix-icon="Lock"
-          />
-        </el-form-item>
-        
-        <el-form-item prop="confirmPassword">
-          <el-input 
-            v-model="form.confirmPassword" 
-            type="password" 
-            placeholder="确认密码"
-            size="large"
-            :prefix-icon="Lock"
-          />
-        </el-form-item>
-        
-        <el-form-item prop="department">
-          <el-select 
-            v-model="form.department" 
-            placeholder="请选择所属部门"
-            size="large"
-            style="width: 100%"
-          >
-            <el-option label="办公室" value="办公室" />
-            <el-option label="竞赛部" value="竞赛部" />
-            <el-option label="项目部" value="项目部" />
-            <el-option label="科普部" value="科普部" />
-          </el-select>
-        </el-form-item>
-        
-        <el-form-item>
-          <el-button 
-            type="primary" 
-            size="large" 
-            @click="handleRegister"
-            :loading="loading"
-            style="width: 100%"
-          >
-            注册
-          </el-button>
-        </el-form-item>
-      </el-form>
-      
-      <div class="auth-links">
-        <span>已有账号？</span>
-        <router-link to="/login">立即登录</router-link>
+  <div class="login-page">
+    <div class="bg-layer"></div>
+    <div class="vignette"></div>
+    <canvas class="rain-canvas" ref="rainCanvas"></canvas>
+
+    <div class="container">
+      <div class="auth-card initial-load" ref="authCard">
+        <div class="view-section active">
+          <div class="brand">
+            <h1>注册账号</h1>
+            <p>创建您的排班系统账户</p>
+          </div>
+          <form @submit.prevent="handleRegister">
+            <div class="form-group">
+              <label class="form-label">学号</label>
+              <input
+                type="text"
+                class="form-input"
+                placeholder="请输入学号"
+                v-model="form.student_id"
+                autocomplete="username"
+              />
+            </div>
+            <div class="form-group">
+              <label class="form-label">姓名</label>
+              <input
+                type="text"
+                class="form-input"
+                placeholder="请输入姓名"
+                v-model="form.name"
+                autocomplete="name"
+              />
+            </div>
+            <div class="form-group">
+              <label class="form-label">邮箱</label>
+              <input
+                type="email"
+                class="form-input"
+                placeholder="请输入邮箱"
+                v-model="form.email"
+                autocomplete="email"
+              />
+            </div>
+            <div class="form-group">
+              <label class="form-label">密码</label>
+              <input
+                type="password"
+                class="form-input"
+                placeholder="请输入密码（至少6位）"
+                v-model="form.password"
+                autocomplete="new-password"
+              />
+            </div>
+            <div class="form-group">
+              <label class="form-label">确认密码</label>
+              <input
+                type="password"
+                class="form-input"
+                placeholder="请再次输入密码"
+                v-model="form.confirmPassword"
+                autocomplete="new-password"
+              />
+            </div>
+            <div class="form-group">
+              <label class="form-label">所属部门</label>
+              <select class="form-input form-select" v-model="form.department">
+                <option value="" disabled>请选择所属部门</option>
+                <option value="办公室">办公室</option>
+                <option value="竞赛部">竞赛部</option>
+                <option value="项目部">项目部</option>
+                <option value="科普部">科普部</option>
+              </select>
+            </div>
+            <button type="submit" class="btn-primary" :disabled="loading">
+              {{ loading ? '注册中...' : '注 册' }}
+            </button>
+          </form>
+          <div class="footer">
+            已有账号？<router-link to="/login" class="text-link" style="font-size:13px;">立即登录</router-link>
+          </div>
+        </div>
       </div>
     </div>
+
+    <div class="toast" :class="{ show: toast.visible }">{{ toast.message }}</div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { register } from '../api/user'
 
 const router = useRouter()
-const formRef = ref()
 const loading = ref(false)
+const rainCanvas = ref(null)
+const authCard = ref(null)
 
 const form = reactive({
   student_id: '',
@@ -109,32 +107,40 @@ const form = reactive({
   department: ''
 })
 
-const validatePass2 = (rule, value, callback) => {
-  if (value !== form.password) {
-    callback(new Error('两次输入密码不一致'))
-  } else {
-    callback()
+const toast = reactive({
+  visible: false,
+  message: ''
+})
+
+let toastTimer = null
+function showToast(msg) {
+  toast.message = msg
+  toast.visible = true
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => {
+    toast.visible = false
+  }, 2500)
+}
+
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+async function handleRegister() {
+  if (!form.student_id || !form.name || !form.email || !form.password || !form.confirmPassword || !form.department) {
+    showToast('请填写完整信息')
+    return
   }
-}
-
-const rules = {
-  student_id: [{ required: true, message: '请输入学号', trigger: 'blur' }],
-  name: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
-  email: [
-    { required: true, message: '请输入邮箱', trigger: 'blur' },
-    { type: 'email', message: '邮箱格式不正确', trigger: 'blur' }
-  ],
-  password: [{ required: true, message: '请输入密码', trigger: 'blur' }, { min: 6, message: '密码至少6位', trigger: 'blur' }],
-  confirmPassword: [
-    { required: true, message: '请确认密码', trigger: 'blur' },
-    { validator: validatePass2, trigger: 'blur' }
-  ],
-  department: [{ required: true, message: '请选择所属部门', trigger: 'change' }]
-}
-
-const handleRegister = async () => {
-  const valid = await formRef.value.validate().catch(() => false)
-  if (!valid) return
+  if (!emailRegex.test(form.email)) {
+    showToast('请输入有效的邮箱地址')
+    return
+  }
+  if (form.password.length < 6) {
+    showToast('密码长度至少6位')
+    return
+  }
+  if (form.password !== form.confirmPassword) {
+    showToast('两次输入的密码不一致')
+    return
+  }
 
   loading.value = true
   try {
@@ -147,62 +153,508 @@ const handleRegister = async () => {
     })
     ElMessage.success('注册成功，请登录')
     router.push('/login')
-  } catch {
-    // 错误已在拦截器处理
+  } catch (error) {
+    // 错误已在请求拦截器处理
   } finally {
     loading.value = false
   }
 }
+
+let animationId = null
+let resizeHandler = null
+let mouseHandler = null
+
+onMounted(() => {
+  setTimeout(() => {
+    if (authCard.value) {
+      authCard.value.classList.remove('initial-load')
+    }
+  }, 1000)
+
+  const canvas = rainCanvas.value
+  if (!canvas) return
+  const ctx = canvas.getContext('2d')
+  let width, height
+  const dpr = window.devicePixelRatio || 1
+
+  function resize() {
+    width = window.innerWidth
+    height = window.innerHeight
+    canvas.width = width * dpr
+    canvas.height = height * dpr
+    canvas.style.width = width + 'px'
+    canvas.style.height = height + 'px'
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  }
+  resize()
+  resizeHandler = resize
+  window.addEventListener('resize', resize)
+
+  const rainCount = Math.min(window.innerWidth * 0.15, 180)
+  const rains = []
+  class RainDrop {
+    constructor() {
+      this.reset()
+      this.y = Math.random() * height
+    }
+    reset() {
+      this.x = Math.random() * width
+      this.y = -50
+      this.length = Math.random() * 20 + 15
+      this.speed = Math.random() * 8 + 6
+      this.opacity = Math.random() * 0.3 + 0.1
+      this.angle = Math.random() * 0.2 + 0.1
+      this.width = Math.random() * 1.5 + 0.5
+    }
+    update() {
+      this.y += this.speed
+      this.x += this.angle
+      if (this.y > height + this.length) this.reset()
+    }
+    draw() {
+      ctx.beginPath()
+      ctx.moveTo(this.x, this.y)
+      ctx.lineTo(this.x + this.angle * 2, this.y + this.length)
+      ctx.strokeStyle = `rgba(200, 220, 255, ${this.opacity})`
+      ctx.lineWidth = this.width
+      ctx.lineCap = 'round'
+      ctx.stroke()
+    }
+  }
+  for (let i = 0; i < rainCount; i++) rains.push(new RainDrop())
+
+  const petals = []
+  class Petal {
+    constructor() {
+      this.reset()
+      this.y = Math.random() * height
+    }
+    reset() {
+      this.x = Math.random() * width
+      this.y = -20
+      this.size = Math.random() * 6 + 3
+      this.speedY = Math.random() * 1.5 + 0.5
+      this.speedX = Math.random() * 1 - 0.5
+      this.rotation = Math.random() * 360
+      this.rotationSpeed = Math.random() * 2 - 1
+      this.opacity = Math.random() * 0.5 + 0.3
+      this.sway = Math.random() * 0.02 + 0.01
+      this.swayOffset = Math.random() * Math.PI * 2
+    }
+    update(time) {
+      this.y += this.speedY
+      this.x += this.speedX + Math.sin(time * this.sway + this.swayOffset) * 0.5
+      this.rotation += this.rotationSpeed
+      if (this.y > height + 20 || this.x < -20 || this.x > width + 20) this.reset()
+    }
+    draw() {
+      ctx.save()
+      ctx.translate(this.x, this.y)
+      ctx.rotate(this.rotation * Math.PI / 180)
+      ctx.fillStyle = `rgba(255, 220, 230, ${this.opacity})`
+      ctx.beginPath()
+      ctx.ellipse(0, 0, this.size, this.size * 0.6, 0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
+    }
+  }
+  for (let i = 0; i < 25; i++) petals.push(new Petal())
+
+  let time = 0
+  function animate() {
+    ctx.clearRect(0, 0, width, height)
+    time += 0.01
+    rains.forEach(r => { r.update(); r.draw() })
+    petals.forEach(p => { p.update(time); p.draw() })
+    animationId = requestAnimationFrame(animate)
+  }
+  animate()
+
+  const bg = document.querySelector('.login-page .bg-layer')
+  mouseHandler = (e) => {
+    const x = (e.clientX / width - 0.5) * 10
+    const y = (e.clientY / height - 0.5) * 10
+    if (bg) {
+      bg.style.transform = `scale(1.05) translate(${-x}px, ${-y}px)`
+    }
+  }
+  document.addEventListener('mousemove', mouseHandler)
+})
+
+onUnmounted(() => {
+  if (animationId) cancelAnimationFrame(animationId)
+  if (resizeHandler) window.removeEventListener('resize', resizeHandler)
+  if (mouseHandler) document.removeEventListener('mousemove', mouseHandler)
+  clearTimeout(toastTimer)
+})
 </script>
 
 <style scoped>
-.auth-page {
-  min-height: 100vh;
+.login-page {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  z-index: 0;
+}
+
+.bg-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background-size: cover;
+  background-position: center;
+  transition: transform 0.3s ease-out;
+}
+
+@media (min-width: 769px) {
+  .bg-layer {
+    background-image: url('../assets/bg-pc.png');
+  }
+}
+
+@media (max-width: 768px) {
+  .bg-layer {
+    background-image: url('../assets/bg-mobile.png');
+  }
+}
+
+.vignette {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  background: radial-gradient(ellipse at center, transparent 0%, rgba(0,0,0,0.15) 100%);
+  pointer-events: none;
+}
+
+.rain-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.container {
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   padding: 20px;
+  overflow-y: auto;
 }
 
-.auth-box {
-  background: #fff;
-  border-radius: 16px;
-  padding: 40px;
-  width: 100%;
-  max-width: 400px;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+@media (min-width: 769px) {
+  .container {
+    justify-content: flex-start;
+    padding-left: 12%;
+  }
 }
 
-.auth-header {
+@media (max-width: 768px) {
+  .container {
+    justify-content: center;
+  }
+}
+
+.auth-card {
+  width: 420px;
+  padding: 40px 36px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow:
+    0 8px 32px 0 rgba(0, 0, 0, 0.2),
+    inset 0 0 0 1px rgba(255,255,255,0.1);
+  position: relative;
+  overflow: hidden;
+  margin: 20px 0;
+}
+
+@media (max-width: 768px) {
+  .auth-card {
+    width: 90%;
+    max-width: 400px;
+    padding: 36px 28px;
+  }
+}
+
+@media (max-width: 480px) {
+  .auth-card {
+    padding: 32px 24px;
+  }
+}
+
+.view-section {
+  display: none;
+  animation: viewEnter 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.view-section.active {
+  display: block;
+}
+
+@keyframes viewEnter {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.auth-card.initial-load {
+  animation: cardEnter 1s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes cardEnter {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.brand {
   text-align: center;
   margin-bottom: 32px;
 }
 
-.auth-header h1 {
-  font-size: 24px;
-  margin: 16px 0 8px;
-  color: #333;
+.brand h1 {
+  font-size: 28px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.95);
+  letter-spacing: 6px;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  margin-bottom: 8px;
 }
 
-.auth-header p {
-  color: #999;
-  font-size: 14px;
+.brand p {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+  letter-spacing: 2px;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.1);
 }
 
-.auth-form {
-  margin-bottom: 24px;
+@media (max-width: 480px) {
+  .brand h1 {
+    font-size: 24px;
+    letter-spacing: 4px;
+  }
 }
 
-.auth-links {
-  text-align: center;
-  font-size: 14px;
-  color: #666;
+.form-group {
+  margin-bottom: 18px;
+  opacity: 0;
+  animation: fadeUp 0.6s ease-out forwards;
 }
 
-.auth-links a {
-  color: #409eff;
+.form-group:nth-child(1) { animation-delay: 0.1s; }
+.form-group:nth-child(2) { animation-delay: 0.15s; }
+.form-group:nth-child(3) { animation-delay: 0.2s; }
+.form-group:nth-child(4) { animation-delay: 0.25s; }
+.form-group:nth-child(5) { animation-delay: 0.3s; }
+.form-group:nth-child(6) { animation-delay: 0.35s; }
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.form-label {
+  display: block;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 6px;
+  letter-spacing: 1px;
+  transition: color 0.3s;
+}
+
+.form-input {
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.25);
+  background: rgba(0, 0, 0, 0.15);
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 15px;
+  outline: none;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(4px);
+  font-family: inherit;
+}
+
+.form-input::placeholder {
+  color: rgba(255,255,255,0.4);
+}
+
+.form-input:focus {
+  border-color: rgba(255,255,255,0.7);
+  background: rgba(0,0,0,0.25);
+  box-shadow: 0 0 20px rgba(255,255,255,0.15), inset 0 0 0 1px rgba(255,255,255,0.1);
+}
+
+.form-group:focus-within .form-label {
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.form-select {
+  appearance: none;
+  cursor: pointer;
+}
+
+.form-select option {
+  background: #1a1a2e;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.text-link {
+  color: rgba(255, 255, 255, 0.7);
   text-decoration: none;
+  transition: all 0.3s;
+  position: relative;
+  background: none;
+  border: none;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 0;
+}
+
+.text-link::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 0;
+  height: 1px;
+  background: rgba(255,255,255,0.6);
+  transition: width 0.3s;
+}
+
+.text-link:hover {
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.text-link:hover::after {
+  width: 100%;
+}
+
+.btn-primary {
+  width: 100%;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.4);
+  background: rgba(255,255,255,0.15);
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 16px;
+  letter-spacing: 4px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+  font-family: inherit;
+  font-weight: 500;
+  opacity: 0;
+  animation: fadeUp 0.6s ease-out 0.4s forwards;
+  margin-top: 8px;
+}
+
+.btn-primary::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(255,255,255,0.2);
+  transform: translateX(-100%);
+  transition: transform 0.5s ease;
+}
+
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+  border-color: rgba(255,255,255,0.7);
+  background: rgba(255,255,255,0.25);
+}
+
+.btn-primary:hover:not(:disabled)::before {
+  transform: translateX(100%);
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.footer {
+  text-align: center;
+  margin-top: 24px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+  opacity: 0;
+  animation: fadeUp 0.6s ease-out 0.5s forwards;
+}
+
+.footer :deep(a) {
+  color: rgba(255, 255, 255, 0.95);
+  text-decoration: none;
+  font-weight: 500;
   margin-left: 4px;
+  transition: opacity 0.3s;
+}
+
+.footer :deep(a:hover) {
+  opacity: 0.8;
+}
+
+.form-input:-webkit-autofill,
+.form-input:-webkit-autofill:hover,
+.form-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: rgba(255, 255, 255, 0.95);
+  -webkit-box-shadow: 0 0 0px 1000px rgba(0,0,0,0.3) inset;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+.toast {
+  position: fixed;
+  top: 40px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-20px);
+  background: rgba(255,255,255,0.2);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.4);
+  color: rgba(255, 255, 255, 0.95);
+  padding: 12px 28px;
+  border-radius: 50px;
+  font-size: 14px;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.4s ease;
+  z-index: 100;
+  letter-spacing: 1px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 </style>
