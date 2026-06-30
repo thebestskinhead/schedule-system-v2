@@ -19,21 +19,18 @@ import (
 )
 
 const (
-	eduBaseURL         = "https://kdjw.hnust.edu.cn"
-	pollInterval       = 2 * time.Second
-	sessionExpire      = 5 * time.Minute
-	maxPollRetries     = 180
-	maxSessions        = 100
-	cleanupInterval    = 10 * time.Minute
+	eduBaseURL      = "https://kdjw.hnust.edu.cn"
+	sessionExpire   = 5 * time.Minute
+	maxSessions     = 100
+	cleanupInterval = 10 * time.Minute
 )
 
-// QRLoginService 管理所有扫码会话
+// QRLoginService 管理所有扫码会话（前端驱动轮询模式）
 type QRLoginService struct {
 	sessions map[string]*model.QRSession
 	mu       sync.RWMutex
 	userDAO  *dao.UserDAO
-	StopCh   chan struct{}
-	once     sync.Once
+	stopCh   chan struct{}
 }
 
 var qrLoginServiceInstance *QRLoginService
@@ -45,57 +42,245 @@ func GetQRLoginService() *QRLoginService {
 		qrLoginServiceInstance = &QRLoginService{
 			sessions: make(map[string]*model.QRSession),
 			userDAO:  dao.NewUserDAO(),
-			StopCh:   make(chan struct{}),
+			stopCh:   make(chan struct{}),
 		}
 		go qrLoginServiceInstance.startCleanupTicker()
 	})
 	return qrLoginServiceInstance
 }
 
-// CreateSession 创建新会话并获取二维码
+// commonHeaders 与 Python test_login.py 一致的请求头
+func commonHeaders(req *http.Request) {
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	req.Header.Set("Connection", "keep-alive")
+	req.Header.Set("Upgrade-Insecure-Requests", "1")
+}
+
+// CreateSession 创建新会话：向教务网获取二维码，保存 CookieJar 和 UUID
 func (s *QRLoginService) CreateSession() (*model.QRStartResponse, error) {
 	s.cleanupIfFull()
 
 	sessionID := generateRandHex(16)
 	eduUUID := generateRandHex(16)
 
-	// 创建会话专用的 HTTP Client（独立 CookieJar）
-	jar, _ := cookiejar.New(nil)
-	client := &http.Client{
-		Jar:     jar,
-		Timeout: 15 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
+	// 创建独立 CookieJar 存储教务网 Cookie
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, fmt.Errorf("创建CookieJar失败: %w", err)
 	}
 
-	// 步骤1：从教务网获取二维码
-	qrcodeB64, err := s.fetchQRCode(client, eduUUID)
+	// 请求教务网二维码（跟随重定向，与 Python 一致）
+	qrcodeB64, err := s.fetchQRCode(jar, eduUUID)
 	if err != nil {
 		return nil, fmt.Errorf("获取二维码失败: %w", err)
 	}
 
 	session := &model.QRSession{
 		SessionID: sessionID,
+		UUID:      eduUUID,
+		CookieJar: jar,
 		Status:    model.QRStatusPending,
 		CreatedAt: time.Now(),
 		ExpiresAt: time.Now().Add(sessionExpire),
-		StopCh:    make(chan struct{}),
-		DoneCh:    make(chan struct{}),
 	}
 
 	s.mu.Lock()
 	s.sessions[sessionID] = session
 	s.mu.Unlock()
 
-	// 后台 goroutine 轮询教务网
-	go s.pollEduLoop(session, client, eduUUID)
-
 	return &model.QRStartResponse{
 		SessionID: sessionID,
 		QRCode:    qrcodeB64,
 		ExpiresIn: 300,
 	}, nil
+}
+
+// Poll 前端触发一次轮询：代理请求教务网，返回当前状态
+func (s *QRLoginService) Poll(sessionID string) *model.QRPollResponse {
+	session := s.GetSession(sessionID)
+	if session == nil {
+		return &model.QRPollResponse{
+			Status:  model.QRStatusExpired,
+			Message: "二维码已过期，请重新获取",
+		}
+	}
+
+	// 检查会话超时
+	if time.Now().After(session.ExpiresAt) {
+		s.DeleteSession(sessionID)
+		return &model.QRPollResponse{
+			Status:  model.QRStatusExpired,
+			Message: "二维码已过期，请重新获取",
+		}
+	}
+
+	// 已完成的会话直接返回结果
+	if session.IsDone() {
+		status, msg := session.GetStatus()
+		switch status {
+		case model.QRStatusSuccess:
+			return &model.QRPollResponse{
+				Status: model.QRStatusSuccess,
+				Token:  session.Token,
+				User:   session.User,
+			}
+		case model.QRStatusNeedReg:
+			return &model.QRPollResponse{
+				Status:    model.QRStatusNeedReg,
+				StudentID: session.StudentID,
+				Name:      session.Name,
+			}
+		case model.QRStatusError:
+			return &model.QRPollResponse{
+				Status:  model.QRStatusError,
+				Message: msg,
+			}
+		}
+	}
+
+	// 防止并发请求同时访问教务网
+	if !session.Processing.TryLock() {
+		status, msg := session.GetStatus()
+		return &model.QRPollResponse{Status: status, Message: msg}
+	}
+	defer session.Processing.Unlock()
+
+	// 双重检查
+	if session.IsDone() {
+		status, msg := session.GetStatus()
+		switch status {
+		case model.QRStatusSuccess:
+			s.DeleteSession(sessionID)
+			return &model.QRPollResponse{Status: model.QRStatusSuccess, Token: session.Token, User: session.User}
+		case model.QRStatusNeedReg:
+			s.DeleteSession(sessionID)
+			return &model.QRPollResponse{Status: model.QRStatusNeedReg, StudentID: session.StudentID, Name: session.Name}
+		case model.QRStatusError:
+			return &model.QRPollResponse{Status: model.QRStatusError, Message: msg}
+		}
+	}
+
+	// 代理请求教务网 checksfhd（跟随重定向，与 Python 一致）
+	statusText, err := s.checkScanStatus(session.CookieJar, session.UUID)
+	if err != nil {
+		// 网络错误不改变状态，继续返回 pending
+		return &model.QRPollResponse{
+			Status:  model.QRStatusPending,
+			Message: "等待扫码",
+		}
+	}
+
+	statusText = strings.TrimSpace(statusText)
+
+	switch statusText {
+	case "0":
+		// 等待扫码
+		return &model.QRPollResponse{
+			Status:  model.QRStatusPending,
+			Message: "等待扫码",
+		}
+
+	case "1":
+		// 已扫码等待确认
+		session.SetStatus(model.QRStatusScanned, "已扫码，请在手机上确认登录")
+		return &model.QRPollResponse{
+			Status:  model.QRStatusScanned,
+			Message: "已扫码，请在手机上确认登录",
+		}
+
+	case "2", "yes":
+		// 用户已确认，执行登录流程
+		session.SetStatus(model.QRStatusConfirmed, "登录确认成功，正在处理...")
+
+		// 执行教务网登录（需要阻止重定向，与 Python allow_redirects=False 一致）
+		ok, err := s.doLogin(session.CookieJar, session.UUID)
+		if !ok || err != nil {
+			errMsg := "教务网登录失败"
+			if err != nil {
+				errMsg = "教务网登录失败: " + err.Error()
+			}
+			session.SetResult(model.QRStatusError, errMsg)
+			// 延长存活，让前端能读到错误状态
+			session.ExpiresAt = time.Now().Add(30 * time.Second)
+			return &model.QRPollResponse{
+				Status:  model.QRStatusError,
+				Message: errMsg,
+			}
+		}
+
+		// 获取用户信息（跟随重定向，与 Python 一致）
+		userInfo, err := s.fetchUserInfo(session.CookieJar)
+		if err != nil {
+			session.SetResult(model.QRStatusError, "获取用户信息失败: "+err.Error())
+			session.ExpiresAt = time.Now().Add(30 * time.Second)
+			return &model.QRPollResponse{
+				Status:  model.QRStatusError,
+				Message: "获取用户信息失败: " + err.Error(),
+			}
+		}
+
+		session.StudentID = userInfo.StudentID
+		session.Name = userInfo.Name
+
+		// 查系统数据库
+		user, err := s.userDAO.GetByStudentID(userInfo.StudentID)
+		if err == nil && user != nil {
+			// 已注册，生成 JWT
+			token, err := utils.GenerateToken(user.ID, user.StudentID, user.Role, user.Department, user.DeptRole)
+			if err != nil {
+				session.SetResult(model.QRStatusError, "生成token失败")
+				session.ExpiresAt = time.Now().Add(30 * time.Second)
+				return &model.QRPollResponse{
+					Status:  model.QRStatusError,
+					Message: "生成token失败",
+				}
+			}
+			session.Token = token
+			session.User = model.UserInfo{
+				ID:         user.ID,
+				StudentID:  user.StudentID,
+				Name:       user.Name,
+				Email:      user.Email,
+				Role:       user.Role,
+				Department: user.Department,
+				DeptRole:   user.DeptRole,
+			}
+			session.SetResult(model.QRStatusSuccess, "登录成功")
+			session.ExpiresAt = time.Now().Add(30 * time.Second)
+			return &model.QRPollResponse{
+				Status: model.QRStatusSuccess,
+				Token:  session.Token,
+				User:   session.User,
+			}
+		}
+
+		// 未注册
+		session.SetResult(model.QRStatusNeedReg, "请先注册账号")
+		session.ExpiresAt = time.Now().Add(30 * time.Second)
+		return &model.QRPollResponse{
+			Status:    model.QRStatusNeedReg,
+			StudentID: session.StudentID,
+			Name:      session.Name,
+		}
+
+	default:
+		// 包含 "success" 字符串的处理（与 Python 一致）
+		if strings.Contains(strings.ToLower(statusText), "success") {
+			session.SetResult(model.QRStatusError, "教务网返回异常状态")
+			session.ExpiresAt = time.Now().Add(30 * time.Second)
+			return &model.QRPollResponse{
+				Status:  model.QRStatusError,
+				Message: "教务网返回异常状态: " + statusText,
+			}
+		}
+		// 未知状态，继续等待
+		return &model.QRPollResponse{
+			Status:  model.QRStatusPending,
+			Message: "等待扫码",
+		}
+	}
 }
 
 // GetSession 获取会话
@@ -109,24 +294,37 @@ func (s *QRLoginService) GetSession(sessionID string) *model.QRSession {
 func (s *QRLoginService) DeleteSession(sessionID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if sess, ok := s.sessions[sessionID]; ok {
-		select {
-		case <-sess.StopCh:
-		default:
-			close(sess.StopCh)
-		}
-		delete(s.sessions, sessionID)
+	delete(s.sessions, sessionID)
+}
+
+// ---------- 教务网 HTTP 请求 ----------
+
+// newRedirectClient 创建跟随重定向的 HTTP Client（用于 QrCodeCreate / checksfhd / fetchUserInfo）
+func newRedirectClient(jar *cookiejar.Jar) *http.Client {
+	return &http.Client{
+		Jar:     jar,
+		Timeout: 15 * time.Second,
 	}
 }
 
-// fetchQRCode 从教务网获取二维码图片
-func (s *QRLoginService) fetchQRCode(client *http.Client, uuid string) (string, error) {
+// newNoRedirectClient 创建不跟随重定向的 HTTP Client（用于 logon_kd）
+func newNoRedirectClient(jar *cookiejar.Jar) *http.Client {
+	return &http.Client{
+		Jar:     jar,
+		Timeout: 15 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+// fetchQRCode 从教务网获取二维码图片（跟随重定向，与 Python create_qrcode 一致）
+func (s *QRLoginService) fetchQRCode(jar *cookiejar.Jar, uuid string) (string, error) {
 	url := fmt.Sprintf("%s/Logon.do?method=QrCodeCreate&uuid=%s", eduBaseURL, uuid)
+	client := newRedirectClient(jar)
 
 	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	commonHeaders(req)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -147,108 +345,14 @@ func (s *QRLoginService) fetchQRCode(client *http.Client, uuid string) (string, 
 	return "data:image/jpeg;base64," + b64, nil
 }
 
-// pollEduLoop 后台持续轮询教务网扫码状态
-func (s *QRLoginService) pollEduLoop(session *model.QRSession, client *http.Client, uuid string) {
-	defer close(session.DoneCh)
-	defer s.DeleteSession(session.SessionID)
-
-	for i := 0; i < maxPollRetries; i++ {
-		select {
-		case <-session.StopCh:
-			return
-		case <-time.After(pollInterval):
-		}
-
-		// 检查过期
-		if time.Now().After(session.ExpiresAt) {
-			s.setSessionStatus(session, model.QRStatusExpired, "二维码已过期")
-			return
-		}
-
-		// 轮询教务网扫码状态
-		statusText, err := s.checkScanStatus(client, uuid)
-		if err != nil {
-			continue
-		}
-
-		statusText = strings.TrimSpace(statusText)
-
-		switch statusText {
-		case "0":
-			// 等待扫码，继续轮询
-		case "1":
-			// 已扫码，等待确认
-			s.setSessionStatus(session, model.QRStatusScanned, "已扫码，请在手机上确认登录")
-		case "2", "yes":
-			s.setSessionStatus(session, model.QRStatusConfirmed, "登录确认成功，正在处理...")
-
-			// 执行登录
-			ok, err := s.doLogin(client, uuid)
-			if !ok || err != nil {
-				errMsg := "教务网登录失败"
-				if err != nil {
-					errMsg = "教务网登录失败: " + err.Error()
-				}
-				s.setSessionStatus(session, model.QRStatusError, errMsg)
-				return
-			}
-
-			// 获取用户信息（学号 + 姓名）
-			userInfo, err := s.fetchUserInfo(client)
-			if err != nil {
-				s.setSessionStatus(session, model.QRStatusError, "获取用户信息失败: "+err.Error())
-				return
-			}
-
-			session.StudentID = userInfo.StudentID
-			session.Name = userInfo.Name
-
-			// 查系统数据库中是否存在该用户
-			user, err := s.userDAO.GetByStudentID(userInfo.StudentID)
-			if err == nil && user != nil {
-				// 用户存在，生成 JWT
-				token, err := utils.GenerateToken(user.ID, user.StudentID, user.Role, user.Department, user.DeptRole)
-				if err != nil {
-					s.setSessionStatus(session, model.QRStatusError, "生成token失败")
-					return
-				}
-
-				session.Token = token
-				session.User = model.UserInfo{
-					ID:         user.ID,
-					StudentID:  user.StudentID,
-					Name:       user.Name,
-					Email:      user.Email,
-					Role:       user.Role,
-					Department: user.Department,
-					DeptRole:   user.DeptRole,
-				}
-				s.setSessionStatus(session, model.QRStatusSuccess, "登录成功")
-
-				// 延长 session 存活时间，让前端有足够时间拿到结果
-				session.ExpiresAt = time.Now().Add(30 * time.Second)
-			} else {
-				// 用户不存在，引导注册
-				s.setSessionStatus(session, model.QRStatusNeedReg, "请先注册账号")
-				// 延长存活时间
-				session.ExpiresAt = time.Now().Add(30 * time.Second)
-			}
-			return
-		default:
-			// 其他状态（可能是 success 或异常），继续轮询
-		}
-	}
-
-	s.setSessionStatus(session, model.QRStatusExpired, "轮询超时")
-}
-
-// checkScanStatus 轮询教务网扫码状态
-func (s *QRLoginService) checkScanStatus(client *http.Client, uuid string) (string, error) {
+// checkScanStatus 轮询教务网扫码状态（跟随重定向，与 Python poll_status 一致）
+func (s *QRLoginService) checkScanStatus(jar *cookiejar.Jar, uuid string) (string, error) {
 	timestamp := time.Now().UnixMilli()
 	url := fmt.Sprintf("%s/Logon.do?method=checksfhd&sid=%s&_=%d", eduBaseURL, uuid, timestamp)
+	client := newRedirectClient(jar)
 
 	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+	commonHeaders(req)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -264,12 +368,13 @@ func (s *QRLoginService) checkScanStatus(client *http.Client, uuid string) (stri
 	return string(body), nil
 }
 
-// doLogin 执行教务网登录（跟随302重定向）
-func (s *QRLoginService) doLogin(client *http.Client, uuid string) (bool, error) {
+// doLogin 执行教务网登录，手动跟随 302 重定向（与 Python do_login 一致）
+func (s *QRLoginService) doLogin(jar *cookiejar.Jar, uuid string) (bool, error) {
 	url := fmt.Sprintf("%s/Logon.do?method=logon_kd&type=wx&sid=%s", eduBaseURL, uuid)
+	client := newNoRedirectClient(jar) // ← 与 Python allow_redirects=False 一致
 
 	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+	commonHeaders(req)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -283,39 +388,35 @@ func (s *QRLoginService) doLogin(client *http.Client, uuid string) (bool, error)
 
 	location := resp.Header.Get("Location")
 	if location == "" {
-		return false, fmt.Errorf("no Location header")
+		return false, fmt.Errorf("no Location header in 302 response")
 	}
 
-	// 跟随第一次重定向
+	// 跟随第一次重定向（跟随重定向，获取第三枚 Cookie）
 	if !strings.HasPrefix(location, "http") {
 		location = eduBaseURL + location
 	}
 
+	client2 := newRedirectClient(jar) // 跟随重定向
 	req2, _ := http.NewRequest("GET", location, nil)
-	req2.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-	resp2, err := client.Do(req2)
+	commonHeaders(req2)
+	resp2, err := client2.Do(req2)
 	if err != nil {
 		return false, err
 	}
 	defer resp2.Body.Close()
 
-	// 继续跟随重定向到主页
+	// 继续跟随到主页
 	if resp2.StatusCode == 302 {
 		homeLocation := resp2.Header.Get("Location")
 		if homeLocation == "" {
-			return true, nil // 登录流程完成
+			return true, nil
 		}
 		if !strings.HasPrefix(homeLocation, "http") {
 			homeLocation = eduBaseURL + homeLocation
 		}
-
 		req3, _ := http.NewRequest("GET", homeLocation, nil)
-		req3.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-		resp3, err := client.Do(req3)
-		if err != nil {
-			// 非致命错误，登录流程已完成
-			return true, nil
-		}
+		commonHeaders(req3)
+		resp3, _ := client2.Do(req3)
 		if resp3 != nil {
 			resp3.Body.Close()
 		}
@@ -324,12 +425,13 @@ func (s *QRLoginService) doLogin(client *http.Client, uuid string) (bool, error)
 	return true, nil
 }
 
-// fetchUserInfo 从教务网个人信息页提取学号和姓名
-func (s *QRLoginService) fetchUserInfo(client *http.Client) (*model.EduUserInfo, error) {
+// fetchUserInfo 从教务网个人信息页提取学号和姓名（跟随重定向，与 Python get_user_info 一致）
+func (s *QRLoginService) fetchUserInfo(jar *cookiejar.Jar) (*model.EduUserInfo, error) {
 	url := fmt.Sprintf("%s/jsxsd/grsz/grsz_xggrxx.do", eduBaseURL)
+	client := newRedirectClient(jar)
 
 	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+	commonHeaders(req)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -347,7 +449,7 @@ func (s *QRLoginService) fetchUserInfo(client *http.Client) (*model.EduUserInfo,
 	}
 	text := string(html)
 
-	// 正则提取学号（与 test_login.py 一致）
+	// 正则提取学号和姓名（与 Python 一致）
 	studentIDRe := regexp.MustCompile(`name="account"[^>]*value="([^"]*)"`)
 	nameRe := regexp.MustCompile(`name="realName"[^>]*value="([^"]*)"`)
 
@@ -374,11 +476,7 @@ func (s *QRLoginService) fetchUserInfo(client *http.Client) (*model.EduUserInfo,
 	}, nil
 }
 
-// setSessionStatus 线程安全地更新会话状态
-func (s *QRLoginService) setSessionStatus(session *model.QRSession, status model.QRStatus, message string) {
-	session.Status = status
-	session.Message = message
-}
+// ---------- 会话管理 ----------
 
 // cleanupIfFull 会话数超过上限时清理最旧的
 func (s *QRLoginService) cleanupIfFull() {
@@ -389,7 +487,6 @@ func (s *QRLoginService) cleanupIfFull() {
 		return
 	}
 
-	// 找最旧的会话
 	var oldestID string
 	var oldestTime time.Time
 	first := true
@@ -401,7 +498,6 @@ func (s *QRLoginService) cleanupIfFull() {
 		}
 	}
 	if oldestID != "" {
-		close(s.sessions[oldestID].StopCh)
 		delete(s.sessions, oldestID)
 	}
 }
@@ -413,7 +509,7 @@ func (s *QRLoginService) startCleanupTicker() {
 
 	for {
 		select {
-		case <-s.StopCh:
+		case <-s.stopCh:
 			return
 		case <-ticker.C:
 			s.cleanupExpired()
@@ -429,11 +525,6 @@ func (s *QRLoginService) cleanupExpired() {
 	now := time.Now()
 	for id, sess := range s.sessions {
 		if now.After(sess.ExpiresAt) {
-			select {
-			case <-sess.StopCh:
-			default:
-				close(sess.StopCh)
-			}
 			delete(s.sessions, id)
 		}
 	}

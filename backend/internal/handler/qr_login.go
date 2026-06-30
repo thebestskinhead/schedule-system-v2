@@ -17,7 +17,7 @@ func NewQRLoginHandler() *QRLoginHandler {
 	}
 }
 
-// StartQrLogin 开始扫码登录，返回二维码
+// StartQrLogin 开始扫码登录：向教务网获取二维码，返回 session_id
 func (h *QRLoginHandler) StartQrLogin(c *gin.Context) {
 	resp, err := h.service.CreateSession()
 	if err != nil {
@@ -28,7 +28,7 @@ func (h *QRLoginHandler) StartQrLogin(c *gin.Context) {
 	utils.Success(c, resp)
 }
 
-// PollQrLogin 轮询扫码登录状态
+// PollQrLogin 前端轮询扫码状态：后端代理请求教务网，返回当前状态
 func (h *QRLoginHandler) PollQrLogin(c *gin.Context) {
 	var req model.QRPollRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -36,40 +36,12 @@ func (h *QRLoginHandler) PollQrLogin(c *gin.Context) {
 		return
 	}
 
-	session := h.service.GetSession(req.SessionID)
-	if session == nil {
-		utils.Success(c, model.QRPollResponse{
-			Status:  model.QRStatusExpired,
-			Message: "二维码已过期，请重新获取",
-		})
-		return
+	result := h.service.Poll(req.SessionID)
+
+	// success / need_reg 后清理 session
+	if result.Status == model.QRStatusSuccess || result.Status == model.QRStatusNeedReg {
+		h.service.DeleteSession(req.SessionID)
 	}
 
-	switch session.Status {
-	case model.QRStatusSuccess:
-		utils.Success(c, model.QRPollResponse{
-			Status:  model.QRStatusSuccess,
-			Token:   session.Token,
-			User:    session.User,
-			Message: "登录成功",
-		})
-		// 登录成功后清理 session
-		h.service.DeleteSession(req.SessionID)
-
-	case model.QRStatusNeedReg:
-		utils.Success(c, model.QRPollResponse{
-			Status:    model.QRStatusNeedReg,
-			Message:   "用户未注册，请先注册",
-			StudentID: session.StudentID,
-			Name:      session.Name,
-		})
-		// 清理 session
-		h.service.DeleteSession(req.SessionID)
-
-	default:
-		utils.Success(c, model.QRPollResponse{
-			Status:  session.Status,
-			Message: session.Message,
-		})
-	}
+	utils.Success(c, result)
 }

@@ -61,7 +61,7 @@
                 <rect x="17" y="20" width="1.5" height="1.5"/>
                 <rect x="20" y="20" width="1.5" height="1.5"/>
               </svg>
-              微信扫码登录
+              企业微信扫码登录
             </button>
           </div>
         </div>
