@@ -92,6 +92,14 @@ export const useUserStore = defineStore('user', () => {
     return false
   }
 
+  // 扫码登录（直接接收 token 和 user）
+  async function qrLogin({ token: newToken, user: newUser }) {
+    token.value = newToken
+    user.value = newUser
+    localStorage.setItem('token', newToken)
+    await loadTempPermissions()
+  }
+
   function setToken(newToken) {
     token.value = newToken
     localStorage.setItem('token', newToken)
@@ -165,6 +173,7 @@ export const useUserStore = defineStore('user', () => {
     department,
     canManageAll,
     canManageDept,
+    qrLogin,
     setToken,
     clearToken,
     loadUserInfo,

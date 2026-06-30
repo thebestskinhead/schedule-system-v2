@@ -46,10 +46,23 @@
           <div class="footer">
             还没有账号？<router-link to="/register" class="text-link" style="font-size:13px;">立即注册</router-link>
           </div>
+
+          <div class="qr-login-area">
+            <button type="button" class="btn-qr-login" @click="showQrLogin = true">
+              <svg class="qr-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+                <rect x="3" y="14" width="7" height="7" rx="1"/>
+                <rect x="17" y="17" width="1.5" height="1.5"/><rect x="20" y="17" width="1.5" height="1.5"/>
+                <rect x="17" y="20" width="1.5" height="1.5"/><rect x="20" y="20" width="1.5" height="1.5"/>
+              </svg>
+              微信扫码登录
+            </button>
+          </div>
         </div>
       </div>
     </div>
 
+    <QrLogin v-model="showQrLogin" />
     <div class="toast" :class="{ show: toast.visible }">{{ toast.message }}</div>
   </div>
 </template>
@@ -59,10 +72,12 @@ import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { login } from '../api/user'
 import { useUserStore } from '../stores/user'
+import QrLogin from '../components/QrLogin.vue'
 
 const router = useRouter()
 const userStore = useUserStore()
 const loading = ref(false)
+const showQrLogin = ref(false)
 const rainCanvas = ref(null)
 const authCard = ref(null)
 
@@ -562,6 +577,39 @@ onUnmounted(() => {
   -webkit-text-fill-color: rgba(255, 255, 255, 0.95);
   -webkit-box-shadow: 0 0 0px 1000px rgba(0,0,0,0.3) inset;
   transition: background-color 5000s ease-in-out 0s;
+}
+
+.qr-login-area {
+  text-align: center;
+  margin-top: 20px;
+  opacity: 0;
+  animation: fadeUp 0.6s ease-out 0.55s forwards;
+}
+
+.btn-qr-login {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 24px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: inherit;
+  letter-spacing: 1px;
+}
+
+.btn-qr-login:hover {
+  border-color: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+.btn-qr-login:active {
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .toast {

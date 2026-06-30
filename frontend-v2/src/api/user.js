@@ -24,3 +24,7 @@ export const createUser = (data) => request.post('/admin/users', data)
 export const updateUser = (id, data) => request.put(`/admin/users/${id}`, data)
 export const deleteUser = (id) => request.delete(`/admin/users/${id}`)
 export const updateUserRole = (id, data) => request.put(`/admin/users/${id}/role`, data)
+
+// 扫码登录相关
+export const qrLoginStart = () => request.post('/qr/login/start', {})
+export const qrLoginPoll = (data) => request.post('/qr/login/poll', data)

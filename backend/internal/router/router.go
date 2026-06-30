@@ -76,6 +76,7 @@ func SetupRouter() *gin.Engine {
 	weeklyDutyHandler := handler.NewWeeklyDutyHandler()
 	tempPermissionHandler := handler.NewTempPermissionHandler()
 	smtpHandler := handler.NewSMTPHandler()
+	qrLoginHandler := handler.NewQRLoginHandler()
 
 	// 初始化应用系统相关服务
 	var applicationHandler *handler.ApplicationHandler
@@ -113,6 +114,10 @@ func SetupRouter() *gin.Engine {
 		// 用户相关（公开）
 		api.POST("/user/register", userHandler.Register)
 		api.POST("/user/login", userHandler.Login)
+
+		// 扫码登录（公开）
+		api.POST("/qr/login/start", qrLoginHandler.StartQrLogin)
+		api.POST("/qr/login/poll", qrLoginHandler.PollQrLogin)
 
 		// 排班相关（公开）
 		api.GET("/schedule/current-week", scheduleHandler.GetCurrentWeek)

@@ -89,11 +89,12 @@
 
 <script setup>
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { register } from '../api/user'
 
 const router = useRouter()
+const route = useRoute()
 const loading = ref(false)
 const rainCanvas = ref(null)
 const authCard = ref(null)
@@ -165,6 +166,14 @@ let resizeHandler = null
 let mouseHandler = null
 
 onMounted(() => {
+  // 从扫码登录跳转过来时，预填学号和姓名
+  if (route.query.student_id) {
+    form.student_id = route.query.student_id
+  }
+  if (route.query.name) {
+    form.name = route.query.name
+  }
+
   setTimeout(() => {
     if (authCard.value) {
       authCard.value.classList.remove('initial-load')

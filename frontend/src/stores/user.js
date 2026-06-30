@@ -143,6 +143,15 @@ export const useUserStore = defineStore('user', () => {
     return data
   }
 
+  // 扫码登录（直接接收 token 和 user，无需请求）
+  const qrLogin = async ({ token: newToken, user: newUser }) => {
+    token.value = newToken
+    user.value = newUser
+    localStorage.setItem('token', newToken)
+    // 登录成功后加载临时权限
+    await loadTempPermissions()
+  }
+
   const register = async (data) => {
     const result = await registerApi(data)
     return result
@@ -175,6 +184,7 @@ export const useUserStore = defineStore('user', () => {
     hasTempPermissionWithResource,
     checkAuth,
     login,
+    qrLogin,
     register,
     logout,
     updateUser,

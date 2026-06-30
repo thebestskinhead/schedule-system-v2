@@ -29,6 +29,15 @@ export const updateProfile = (data) => {
   return request.put('/user/profile', data)
 }
 
+// 扫码登录相关
+export const qrLoginStart = () => {
+  return request.post('/qr/login/start', {})
+}
+
+export const qrLoginPoll = (data) => {
+  return request.post('/qr/login/poll', data)
+}
+
 // 统一的 userAPI 对象
 export const userAPI = {
   register,
