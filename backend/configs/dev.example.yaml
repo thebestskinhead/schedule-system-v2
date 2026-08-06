@@ -1,0 +1,11 @@
+﻿# 开发模式配置示例：复制为 dev.yaml 后使用。
+# 仅在使用 go run 直接运行后端（或设置 SCHEDULE_DEV=1）时生效：
+# 后端不再托管静态构建产物，而是把页面请求反向代理到下面的前端开发服务器，
+# /api 接口仍由后端直接处理。生产构建（go build 产物）忽略此文件。
+enabled: true
+
+# 电脑端前端开发服务器（frontend-v2, vite, 默认 5173）
+frontend: "http://localhost:5173"
+
+# 移动端前端开发服务器（frontend-mobile, vite, base=/mobile/, 默认 5174）
+mobile: "http://localhost:5174"

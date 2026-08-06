@@ -46,6 +46,7 @@ logs/
 backend/configs/config.yaml
 backend/configs/*.yaml
 !backend/configs/config.example.yaml
+!backend/configs/dev.example.yaml
 windows-release/config.yaml
 
 # Backend compiled binaries

@@ -1,7 +1,10 @@
 package router
 
 import (
+	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"schedule-system-v2/backend/internal/auth"
@@ -248,13 +251,6 @@ func SetupRouter() *gin.Engine {
 		authGroup.GET("/applications/stats", applicationHandler.GetStats)
 	}
 
-	// 静态文件服务
-	distPath := getDistPath()
-	mobileDistPath := getMobileDistPath()
-	assetsPath := filepath.Join(distPath, "assets")
-	indexPath := filepath.Join(distPath, "index.html")
-	mobileIndexPath := filepath.Join(mobileDistPath, "index.html")
-
 	// 阻止已安装系统访问 init 页面
 	r.Use(func(c *gin.Context) {
 		path := c.Request.URL.Path
@@ -270,6 +266,24 @@ func SetupRouter() *gin.Engine {
 		}
 		c.Next()
 	})
+
+	// 开发模式：go run 直接运行（或 SCHEDULE_DEV=1）且存在 dev 配置时，
+	// 将页面请求反向代理到前端开发服务器（vite），/api 仍由后端直接处理。
+	devCfg, devErr := config.LoadDevConfig(config.DevConfigFilePath)
+	if devErr != nil {
+		log.Printf("加载开发配置 %s 失败: %v", config.DevConfigFilePath, devErr)
+	}
+	if config.IsDevRun() && devCfg != nil {
+		setupDevProxy(r, devCfg)
+		return r
+	}
+
+	// 静态文件服务（生产模式：直接托管构建产物）
+	distPath := getDistPath()
+	mobileDistPath := getMobileDistPath()
+	assetsPath := filepath.Join(distPath, "assets")
+	indexPath := filepath.Join(distPath, "index.html")
+	mobileIndexPath := filepath.Join(mobileDistPath, "index.html")
 
 	// 移动端前端路由 - /mobile 及其子路径
 	r.GET("/mobile", func(c *gin.Context) {
@@ -325,4 +339,46 @@ func SetupRouter() *gin.Engine {
 	})
 
 	return r
+}
+
+// setupDevProxy 开发模式路由：把页面请求代理到 vite 开发服务器。
+// 移动端 vite 的 base 为 /mobile/，路径原样转发即可；其余非 /api 请求走电脑端。
+func setupDevProxy(r *gin.Engine, cfg *config.DevConfig) {
+	mobileProxy := newDevReverseProxy(cfg.Mobile)
+	frontendProxy := newDevReverseProxy(cfg.Frontend)
+
+	log.Printf("开发模式（代理前端开发服务器）: 电脑端 -> %s, 移动端 -> %s", cfg.Frontend, cfg.Mobile)
+
+	// 移动端：/mobile 及其子路径（含 /mobile/assets、HMR 相关请求）
+	r.Any("/mobile", mobileProxy)
+	r.Any("/mobile/*action", mobileProxy)
+
+	// 其余非 API 请求（页面、/@vite/client、/src、/node_modules 等）代理到电脑端
+	r.NoRoute(func(c *gin.Context) {
+		path := c.Request.URL.Path
+		if strings.HasPrefix(path, "/api") {
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": "API not found"})
+			return
+		}
+		frontendProxy(c)
+	})
+}
+
+// newDevReverseProxy 创建到前端开发服务器的反向代理处理器。
+// httputil.ReverseProxy 支持 WebSocket 升级，vite HMR 可正常工作。
+func newDevReverseProxy(target string) gin.HandlerFunc {
+	u, err := url.Parse(target)
+	if err != nil {
+		log.Fatalf("开发模式前端地址无效 %q: %v", target, err)
+	}
+	proxy := httputil.NewSingleHostReverseProxy(u)
+	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, e error) {
+		log.Printf("代理到 %s 失败: %v", target, e)
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusBadGateway)
+		w.Write([]byte("前端开发服务器未启动或无法连接: " + target + "\n提示：开发模式仅代理页面请求，需先启动前端 vite（对应目录下 npm run dev），或在项目根目录用 .\\dev.ps1 一键启动前后端。"))
+	}
+	return func(c *gin.Context) {
+		proxy.ServeHTTP(c.Writer, c.Request)
+	}
 }

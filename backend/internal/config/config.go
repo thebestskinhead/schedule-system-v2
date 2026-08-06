@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"gopkg.in/yaml.v3"
@@ -46,6 +47,56 @@ var GlobalConfig *Config
 
 // 配置文件路径（固定）
 const ConfigFilePath = "configs/config.yaml"
+
+// DevConfigFilePath 开发模式配置文件路径（仅 go run 直接运行时读取）
+const DevConfigFilePath = "configs/dev.yaml"
+
+// DevConfig 开发模式配置：go run 直接运行时，将页面请求代理到前端开发服务器
+type DevConfig struct {
+	Enabled  bool   `yaml:"enabled"`  // 是否启用开发代理
+	Frontend string `yaml:"frontend"` // 电脑端前端开发服务器地址（vite）
+	Mobile   string `yaml:"mobile"`   // 移动端前端开发服务器地址（vite）
+}
+
+// IsDevRun 检测是否为 go run 直接运行。
+// go run 的可执行文件位于 go-build 临时目录；也可通过 SCHEDULE_DEV=1 显式指定。
+func IsDevRun() bool {
+	if os.Getenv("SCHEDULE_DEV") == "1" {
+		return true
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(exe), "go-build")
+}
+
+// LoadDevConfig 加载开发模式配置。
+// 文件不存在或未启用时返回 (nil, nil)，由调用方回退到静态文件托管。
+func LoadDevConfig(path string) (*DevConfig, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var cfg DevConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	if !cfg.Enabled {
+		return nil, nil
+	}
+	if cfg.Frontend == "" {
+		cfg.Frontend = "http://localhost:5173"
+	}
+	if cfg.Mobile == "" {
+		cfg.Mobile = "http://localhost:5174"
+	}
+	return &cfg, nil
+}
 
 // IsInstalled 检查系统是否已安装（通过配置文件的 installed 字段）
 func IsInstalled() bool {
