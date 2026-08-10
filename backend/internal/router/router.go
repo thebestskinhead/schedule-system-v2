@@ -50,6 +50,22 @@ func getMobileDistPath() string {
 	return "./dist-mobile"
 }
 
+// isMobileUA 判断 User-Agent 是否为移动端设备
+func isMobileUA(ua string) bool {
+	lower := strings.ToLower(ua)
+	keywords := []string{
+		"mobile", "android", "iphone", "ipod", "ipad",
+		"windows phone", "iemobile", "opera mini",
+		"blackberry", "bb10", "webos", "palm", "midp", "symbian", "nokia",
+	}
+	for _, kw := range keywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
 func SetupRouter() *gin.Engine {
 	r := gin.Default()
 
@@ -127,6 +143,29 @@ func SetupRouter() *gin.Engine {
 			}
 		}
 		c.Next()
+	})
+
+	// 移动端 UA 自动跳转到移动端页面（/mobile/...）
+	r.Use(func(c *gin.Context) {
+		path := c.Request.URL.Path
+		// 仅处理电脑端页面请求：排除 API、移动端路径、静态资源文件
+		if strings.HasPrefix(path, "/api") ||
+			path == "/mobile" || strings.HasPrefix(path, "/mobile/") ||
+			strings.HasPrefix(path, "/assets/") ||
+			filepath.Ext(path) != "" ||
+			!isMobileUA(c.GetHeader("User-Agent")) {
+			c.Next()
+			return
+		}
+		target := "/mobile"
+		if path != "/" {
+			target = "/mobile" + path
+		}
+		if q := c.Request.URL.RawQuery; q != "" {
+			target += "?" + q
+		}
+		c.Redirect(http.StatusFound, target)
+		c.Abort()
 	})
 
 	// 开发模式：go run 直接运行（或 SCHEDULE_DEV=1）且存在 dev 配置时，
