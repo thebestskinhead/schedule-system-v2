@@ -46,7 +46,7 @@ type AdminCreateUserRequest struct {
 	Name       string `json:"name" binding:"required"`
 	Email      string `json:"email" binding:"required,email"`
 	Department string `json:"department" binding:"required"`
-	Role       string `json:"role" binding:"required,oneof=user admin"`
+	Role       string `json:"role" binding:"required,oneof=admin user"`
 	DeptRole   string `json:"dept_role" binding:"required,oneof=dept_admin dept_member"`
 	Password   string `json:"password" binding:"omitempty,min=6"`
 }
@@ -56,6 +56,6 @@ type AdminUpdateUserRequest struct {
 	Name       string `json:"name" binding:"required"`
 	Email      string `json:"email" binding:"required,email"`
 	Department string `json:"department" binding:"required"`
-	Role       string `json:"role" binding:"required,oneof=user admin"`
+	Role       string `json:"role" binding:"required,oneof=admin user"`
 	DeptRole   string `json:"dept_role" binding:"required,oneof=dept_admin dept_member"`
 }

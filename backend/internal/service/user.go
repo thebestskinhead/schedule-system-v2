@@ -35,12 +35,12 @@ func (s *UserService) Register(req *model.RegisterRequest) (*model.User, error) 
 		return nil, err
 	}
 
-	role := "user"
-	deptRole := model.DeptRoleMember
+	role := model.RoleUser
+	deptRole := model.RoleDeptMember
 	initialized, _ := s.systemDAO.IsInitialized()
 	if !initialized {
-		role = "admin"
-		deptRole = model.DeptRoleAdmin
+		role = model.RoleAdmin
+		deptRole = model.RoleDeptAdmin
 	}
 
 	user := &model.User{
@@ -114,6 +114,7 @@ func (s *UserService) UpdateUser(userID int, req *model.UpdateUserRequest) error
 }
 
 func (s *UserService) SetUserRole(targetUserID int, role string) error {
+	// 统一角色体系下，仅允许设置系统管理员角色（或普通用户角色）
 	if role != model.RoleAdmin && role != model.RoleUser {
 		return errors.New("无效的角色")
 	}
@@ -160,7 +161,7 @@ func (s *UserService) SetUserDepartment(targetUserID int, dept string) error {
 // SetUserDeptRole 设置用户部门角色（权限由 handler 层校验）
 func (s *UserService) SetUserDeptRole(targetUserID int, deptRole string) error {
 	// 验证角色是否有效
-	if deptRole != model.DeptRoleAdmin && deptRole != model.DeptRoleMember {
+	if deptRole != model.RoleDeptAdmin && deptRole != model.RoleDeptMember {
 		return errors.New("无效的部门角色")
 	}
 

@@ -117,7 +117,7 @@ func (h *ApplicationHandler) GetPendingApprovals(c *gin.Context) {
 	applications, total, err := h.applicationService.GetPendingApprovals(
 		c.Request.Context(),
 		checker.GetUserID(),
-		checker.IsAdmin(),
+		checker.HasPermission(auth.PermUserManageAll),
 		checker.GetDepartment(),
 		page,
 		pageSize,
@@ -152,7 +152,7 @@ func (h *ApplicationHandler) GetDetail(c *gin.Context) {
 		c.Request.Context(),
 		id,
 		checker.GetUserID(),
-		checker.IsAdmin(),
+		checker.HasPermission(auth.PermUserManageAll),
 	)
 	if err != nil {
 		utils.Error(c, 403, err.Error())
@@ -266,7 +266,7 @@ func (h *ApplicationHandler) GetStats(c *gin.Context) {
 	stats, err := h.applicationService.GetApplicationStats(
 		c.Request.Context(),
 		checker.GetUserID(),
-		checker.IsAdmin(),
+		checker.HasPermission(auth.PermUserManageAll),
 		checker.GetDepartment(),
 	)
 	if err != nil {
@@ -285,14 +285,6 @@ func (h *ApplicationHandler) GetAvailablePermissions(c *gin.Context) {
 		return
 	}
 
-	// 构建用户信息
-	user := &model.User{
-		ID:         checker.GetUserID(),
-		Role:       checker.GetRole(),
-		Department: checker.GetDepartment(),
-		DeptRole:   checker.GetDeptRole(),
-	}
-
-	permissions := service.GetAvailablePermissions(user)
+	permissions := service.GetAvailablePermissions(checker)
 	utils.Success(c, permissions)
 }

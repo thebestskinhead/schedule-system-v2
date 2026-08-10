@@ -53,18 +53,12 @@ func (s *WeeklyDutyService) PublishAssignment(adminID int, req *model.PublishAss
 // GetWeekAssignments 获取指定周次的分工
 // checker: 权限检查器
 func (s *WeeklyDutyService) GetWeekAssignments(week int, userDept string, checker *auth.Checker) ([]model.WeeklyDutyAssignment, error) {
-	// 系统管理员或办公室管理员可以查看所有部门
-	if checker.IsAdmin() || checker.IsOfficeAdmin() {
+	// 拥有全局排班查看权限：返回所有部门分工
+	if checker.HasPermission(auth.PermScheduleViewAll) {
 		return s.dao.GetByWeek(week)
 	}
 
-	// 部门管理员可以查看自己管理的部门
-	if checker.IsDeptAdmin() {
-		// 如果是自己部门的管理员，查看自己部门
-		return s.dao.GetByWeekAndDept(week, userDept)
-	}
-
-	// 普通成员只能查看自己部门
+	// 其余用户只能查看自己部门的分工
 	return s.dao.GetByWeekAndDept(week, userDept)
 }
 
@@ -135,8 +129,8 @@ func (s *WeeklyDutyService) GetWeekAssignmentView(week int, checker *auth.Checke
 
 	// 获取所有部门
 	departments := model.Departments
-	if !checker.IsAdmin() && !checker.IsOfficeAdmin() {
-		// 非管理员只能看自己部门
+	if !checker.HasPermission(auth.PermScheduleViewAll) {
+		// 非全局管理员只能看自己部门
 		departments = []string{checker.GetDepartment()}
 	}
 
@@ -178,6 +172,6 @@ func (s *WeeklyDutyService) GetWeekAssignmentView(week int, checker *auth.Checke
 
 // CanPublish 检查用户是否可以发布分工
 func (s *WeeklyDutyService) CanPublish(checker *auth.Checker) bool {
-	// 系统管理员或办公室管理员可以发布
-	return checker.IsAdmin() || checker.IsOfficeAdmin()
+	// 拥有发布权限即可
+	return checker.HasPermission(auth.PermSchedulePublish)
 }

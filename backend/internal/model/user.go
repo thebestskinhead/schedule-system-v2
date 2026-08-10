@@ -17,21 +17,39 @@ type User struct {
 	UpdatedAt  time.Time `json:"updated_at" db:"updated_at"`
 }
 
-// UserRole 用户角色常量
+// UserRole 统一角色常量（单一角色体系）
+// 说明：系统采用统一角色体系，用户通过 role 字段标识唯一角色；
+// 为兼容旧数据，role=admin 视为系统管理员，其余用户通过 dept_role+department 解析出部门角色。
 const (
-	RoleAdmin = "admin"
-	RoleUser  = "user"
+	RoleAdmin       = "admin"        // 系统管理员（拥有全部权限）
+	RoleOfficeAdmin = "office_admin" // 办公室管理员
+	RoleDeptAdmin   = "dept_admin"   // 部门管理员
+	RoleDeptMember  = "dept_member"  // 部门成员
+	RoleUser        = "user"         // 普通用户
 )
 
-// DeptRole 部门角色常量
-const (
-	DeptRoleAdmin  = "dept_admin"
-	DeptRoleMember = "dept_member"
-)
+// DepartmentOffice 办公室部门名（办公室管理员所在部门）
+const DepartmentOffice = "办公室"
 
 // Departments 可选部门列表
 // 部门对应的资源ID：办公室=1, 竞赛部=2, 项目部=3, 科普部=4
-var Departments = []string{"办公室", "竞赛部", "项目部", "科普部"}
+var Departments = []string{DepartmentOffice, "竞赛部", "项目部", "科普部"}
+
+// DepartmentID 获取部门对应的资源ID（用于资源范围判定）
+func DepartmentID(name string) int {
+	switch name {
+	case DepartmentOffice:
+		return 1
+	case "竞赛部":
+		return 2
+	case "项目部":
+		return 3
+	case "科普部":
+		return 4
+	default:
+		return 0
+	}
+}
 
 // RegisterRequest 注册请求
 type RegisterRequest struct {

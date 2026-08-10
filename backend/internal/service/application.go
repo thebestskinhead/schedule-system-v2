@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -78,7 +79,7 @@ func (s *ApplicationService) CreateApplication(ctx context.Context, userID int, 
 
 	// 检查用户是否可以申请
 	if can, msg := executor.CanApply(ctx, userID, data); !can {
-		return nil, fmt.Errorf(msg)
+		return nil, errors.New(msg)
 	}
 
 	// 验证数据
@@ -312,7 +313,7 @@ func (s *ApplicationService) canApprove(ctx context.Context, app *model.Applicat
 	}
 
 	// 系统管理员可以审批所有
-	if user.Role == "admin" {
+	if user.Role == model.RoleAdmin {
 		return true, nil
 	}
 
@@ -351,7 +352,7 @@ func (s *ApplicationService) canApprove(ctx context.Context, app *model.Applicat
 		if err != nil {
 			return false, err
 		}
-		if user.DeptRole != "dept_admin" || user.Department != applicant.Department {
+		if user.DeptRole != model.RoleDeptAdmin || user.Department != applicant.Department {
 			return false, nil
 		}
 		// 权限范围检查：部门管理员不能审批全局权限申请
@@ -371,9 +372,9 @@ func (s *ApplicationService) canApprove(ctx context.Context, app *model.Applicat
 	// 检查审批角色
 	switch currentStep.Role {
 	case "admin":
-		return user.Role == "admin", nil
+		return user.Role == model.RoleAdmin, nil
 	case "dept_admin":
-		if user.DeptRole != "dept_admin" {
+		if user.DeptRole != model.RoleDeptAdmin {
 			return false, nil
 		}
 		// 部门管理员可以审批本部门申请
@@ -397,7 +398,7 @@ func (s *ApplicationService) canApprove(ctx context.Context, app *model.Applicat
 		}
 		return true, nil
 	case "office_admin":
-		return user.Department == "办公室" && user.DeptRole == "dept_admin", nil
+		return user.Department == model.DepartmentOffice && user.DeptRole == model.RoleDeptAdmin, nil
 	default:
 		return false, nil
 	}

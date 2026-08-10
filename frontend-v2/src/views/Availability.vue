@@ -4,14 +4,11 @@
       <div class="card-header">
         <span class="card-title">我的无课表</span>
         <div class="action-bar">
-          <el-button type="warning" @click="showCookieDialog = true">
-            <el-icon><Download /></el-icon> Cookie导入
+          <el-button type="warning" @click="handleSchoolImport">
+            <el-icon><Download /></el-icon> 从教务系统导入
           </el-button>
           <el-button type="primary" @click="showXLSUpload = true">
             <el-icon><Document /></el-icon> XLS导入
-          </el-button>
-          <el-button type="info" @click="$router.push('/availability/crawler')">
-            <el-icon><View /></el-icon> 课表预览
           </el-button>
         </div>
       </div>
@@ -106,55 +103,6 @@
       </template>
     </el-dialog>
 
-    <!-- Cookie导入对话框 -->
-    <el-dialog v-model="showCookieDialog" :title="isImporting ? '导入中...' : '从教务系统导入'" width="550px" :close-on-click-modal="!isImporting" :show-close="!isImporting">
-      <!-- 导入表单 -->
-      <div v-if="!isImporting">
-        <el-form :model="cookieForm" :rules="cookieRules" ref="cookieFormRef" label-width="100px">
-          <el-form-item label="Cookie" prop="cookies">
-            <el-input
-              v-model="cookieForm.cookies"
-              type="textarea"
-              :rows="3"
-              placeholder="bzb_jsxsd=xxx; SERVERID=xxx; bzb_njw=xxx"
-            />
-            <div class="form-tip">
-              获取方法：登录教务系统 → F12 → Network → 刷新页面 → 点击任意请求 → Headers → Request Headers → 复制 Cookie 整行内容
-            </div>
-          </el-form-item>
-          <el-form-item label="学期" prop="semester">
-            <el-select v-model="cookieForm.semester" placeholder="选择学期" style="width: 100%">
-              <el-option label="2025-2026-2" value="2025-2026-2" />
-              <el-option label="2025-2026-1" value="2025-2026-1" />
-              <el-option label="2024-2025-2" value="2024-2025-2" />
-              <el-option label="2024-2025-1" value="2024-2025-1" />
-            </el-select>
-          </el-form-item>
-        </el-form>
-      </div>
-
-      <!-- 导入中状态 -->
-      <div v-else class="importing-status">
-        <el-progress :percentage="taskProgress" :status="taskStatus === 'failed' ? 'exception' : ''" striped striped-flow />
-        <div class="task-status-tag">
-          <el-tag :type="getStatusType(taskStatus)" size="large" effect="dark">
-            {{ getStatusText(taskStatus) }}
-          </el-tag>
-        </div>
-        <p class="task-detail">{{ taskDetail }}</p>
-        <div v-if="currentTask" class="task-info">
-          <p><strong>任务ID:</strong> {{ currentTask.id }}</p>
-          <p><strong>提交时间:</strong> {{ formatTime(currentTask.created_at) }}</p>
-        </div>
-      </div>
-
-      <template #footer>
-        <el-button v-if="!isImporting" @click="showCookieDialog = false">取消</el-button>
-        <el-button v-if="!isImporting" type="primary" @click="handleCookieImport" :loading="cookieLoading">开始导入</el-button>
-        <el-button v-if="isImporting" @click="cancelImport">取消等待</el-button>
-      </template>
-    </el-dialog>
-
     <!-- XLS上传对话框 -->
     <el-dialog v-model="showXLSUpload" title="从XLS文件导入" width="500px">
       <el-alert
@@ -206,25 +154,17 @@
 
 <script setup>
 import { ref, reactive, onMounted, computed, onUnmounted, nextTick } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { getMyAvailability, addAvailability, deleteAvailability, importFromCookie, importFromXLS } from '../api/availability'
+import { ElMessage } from 'element-plus'
+import { getMyAvailability, addAvailability, deleteAvailability, importFromXLS } from '../api/availability'
 import { getImportStatus } from '../api/crawler'
 import { getCurrentWeek } from '../api/schedule'
 
 const loading = ref(false)
 const availabilityList = ref([])
 
-// Cookie导入相关
-const showCookieDialog = ref(false)
-const cookieLoading = ref(false)
-const cookieFormRef = ref()
-const cookieForm = reactive({
-  cookies: '',
-  semester: '2025-2026-2'
-})
-const cookieRules = {
-  cookies: [{ required: true, message: '请输入Cookie', trigger: 'blur' }],
-  semester: [{ required: true, message: '请选择学期', trigger: 'change' }]
+// 从教务系统导入（仅手机端支持）
+const handleSchoolImport = () => {
+  ElMessage.info('该功能仅限手机端使用')
 }
 
 // XLS上传相关
@@ -434,43 +374,6 @@ const fetchData = async () => {
   }
 }
 
-// Cookie导入（异步任务模式）
-const handleCookieImport = async () => {
-  const valid = await cookieFormRef.value.validate().catch(() => false)
-  if (!valid) return
-
-  cookieLoading.value = true
-  try {
-    // 提交异步任务
-    const data = await importFromCookie({
-      cookies: cookieForm.cookies,
-      semester: cookieForm.semester
-    })
-
-    // 切换到导入中状态
-    isImporting.value = true
-    await nextTick()
-
-    currentTask.value = {
-      id: data.task_id,
-      created_at: data.created_at,
-      ...data
-    }
-    taskStatus.value = data.status || 'pending'
-    taskProgress.value = 10
-    taskDetail.value = '任务已提交，正在排队中...'
-
-    ElMessage.success('任务已提交，正在导入中...')
-
-    // 开始轮询任务状态
-    startStatusPolling()
-  } catch (error) {
-    ElMessage.error(error.message || '提交任务失败')
-  } finally {
-    cookieLoading.value = false
-  }
-}
-
 // 开始轮询任务状态
 const startStatusPolling = () => {
   // 延迟1秒后查询，给服务器处理时间
@@ -524,7 +427,6 @@ const checkTaskStatus = async () => {
 const handleImportComplete = (data) => {
   clearInterval(statusPollTimer)
   isImporting.value = false
-  showCookieDialog.value = false
 
   Object.assign(importResult, {
     success: true,
@@ -554,7 +456,6 @@ const handleImportFailed = (data) => {
     imported: 0
   })
 
-  showCookieDialog.value = false
   showImportResult.value = true
   ElMessage.error(data.error || '导入失败')
 }

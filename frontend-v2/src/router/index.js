@@ -19,11 +19,6 @@ const routes = [
         component: () => import('../views/Availability.vue')
       },
       {
-        path: 'availability/crawler',
-        name: 'CrawlerImport',
-        component: () => import('../views/CrawlerImport.vue')
-      },
-      {
         path: 'duty/my',
         name: 'MyDuty',
         component: () => import('../views/MyDuty.vue')

@@ -228,12 +228,10 @@ func (h *UserHandler) GetUserListByDepartment(c *gin.Context) {
 		return
 	}
 
-	// 非管理员只能查看自己部门的用户
-	if !checker.IsAdmin() && !checker.IsOfficeAdmin() {
-		if checker.GetDepartment() != dept {
-			auth.ResponseForbidden(c, "只能查看本部门用户")
-			return
-		}
+	// 非全局管理员只能查看自己有权限访问的部门用户
+	if !checker.CanAccessDept(dept) {
+		auth.ResponseForbidden(c, "只能查看本部门用户")
+		return
 	}
 
 	users, err := h.service.GetUserListByDepartment(dept)
@@ -262,8 +260,8 @@ func (h *UserHandler) GetUserListByDepartment(c *gin.Context) {
 func (h *UserHandler) GetUsersForSchedule(c *gin.Context) {
 	checker := auth.GetChecker(c)
 
-	// 系统管理员或办公室管理员：返回所有用户（排除部门管理员）
-	if checker.IsAdmin() || checker.IsOfficeAdmin() {
+	// 拥有全局排班查看权限：返回所有用户（排除部门管理员）
+	if checker.HasPermission(auth.PermScheduleViewAll) {
 		users, err := h.service.GetUserList()
 		if err != nil {
 			utils.Error(c, 500, "获取用户列表失败")
@@ -273,7 +271,7 @@ func (h *UserHandler) GetUsersForSchedule(c *gin.Context) {
 		var result []gin.H
 		for i := range users {
 			// 排除部门管理员
-			if users[i].DeptRole == model.DeptRoleAdmin {
+			if users[i].DeptRole == model.RoleDeptAdmin {
 				continue
 			}
 			result = append(result, gin.H{
@@ -304,7 +302,7 @@ func (h *UserHandler) GetUsersForSchedule(c *gin.Context) {
 	var result []gin.H
 	for i := range users {
 		// 排除部门管理员
-		if users[i].DeptRole == model.DeptRoleAdmin {
+		if users[i].DeptRole == model.RoleDeptAdmin {
 			continue
 		}
 		result = append(result, gin.H{
@@ -319,9 +317,9 @@ func (h *UserHandler) GetUsersForSchedule(c *gin.Context) {
 
 // SetUserDepartment 设置用户部门
 func (h *UserHandler) SetUserDepartment(c *gin.Context) {
-	// 权限检查 - 需要系统管理员或办公室管理员
+	// 权限检查 - 需要用户管理权限（全局）
 	checker := auth.GetChecker(c)
-	if !checker.IsAdmin() && !checker.IsOfficeAdmin() {
+	if !checker.HasPermission(auth.PermUserManage) {
 		auth.ResponseForbidden(c, "无权设置用户部门")
 		return
 	}
@@ -348,9 +346,9 @@ func (h *UserHandler) SetUserDepartment(c *gin.Context) {
 
 // SetUserDeptRole 设置用户部门角色
 func (h *UserHandler) SetUserDeptRole(c *gin.Context) {
-	// 权限检查 - 需要系统管理员或办公室管理员
+	// 权限检查 - 需要用户管理权限（全局）
 	checker := auth.GetChecker(c)
-	if !checker.IsAdmin() && !checker.IsOfficeAdmin() {
+	if !checker.HasPermission(auth.PermUserManage) {
 		auth.ResponseForbidden(c, "无权设置用户部门角色")
 		return
 	}
@@ -390,8 +388,8 @@ func (h *UserHandler) GetUsersByFilter(c *gin.Context) {
 		return
 	}
 
-	// 非管理员只能查看自己部门的用户
-	if !checker.IsAdmin() && !checker.IsOfficeAdmin() {
+	// 非全局管理员只能查看自己部门的用户
+	if !checker.HasPermission(auth.PermUserManageAll) {
 		filter.Departments = []string{checker.GetDepartment()}
 	}
 

@@ -74,8 +74,8 @@ func (h *TempPermissionHandler) GetAllPermissions(c *gin.Context) {
 	var perms []model.TempPermissionView
 	var err error
 
-	// 系统管理员/办公室管理员查看所有，部门管理员只查看自己部门的
-	if checker.IsAdmin() || checker.IsOfficeAdmin() {
+	// 拥有全局用户管理权限查看所有，其余只查看自己部门的
+	if checker.HasPermission(auth.PermUserManageAll) {
 		perms, err = h.service.GetAllActivePermissions()
 	} else {
 		// 部门管理员只能看到自己部门的权限

@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"strconv"
 	"time"
 	"schedule-system-v2/backend/internal/auth"
 	"schedule-system-v2/backend/internal/dao"
@@ -88,7 +89,7 @@ func (s *TempPermissionService) canGrantPermission(checker *auth.Checker, perm m
 		return checker.HasPermission(auth.PermScheduleViewAll)
 	case auth.PermUserManageAll:
 		// 全局用户管理权限
-		return checker.IsOfficeAdmin() || checker.IsAdmin()
+		return checker.HasPermission(auth.PermUserManageAll)
 	default:
 		return false
 	}
@@ -102,13 +103,8 @@ func (s *TempPermissionService) RevokePermission(adminID int, checker *auth.Chec
 		return errors.New("权限记录不存在")
 	}
 
-	// 系统管理员可以撤销任何权限
-	if checker.IsAdmin() {
-		return s.dao.Revoke(permID)
-	}
-
-	// 办公室管理员可以撤销任何权限
-	if checker.IsOfficeAdmin() {
+	// 拥有全局用户管理权限可以撤销任何权限
+	if checker.HasPermission(auth.PermUserManageAll) {
 		return s.dao.Revoke(permID)
 	}
 
@@ -205,9 +201,9 @@ func (s *TempPermissionService) GetMyPermissions(userID int) ([]model.MyPermissi
 		// 获取资源名称
 		resourceName := "全部"
 		if perm.ResourceType == "dept" {
-			resourceName = "部门ID: " + string(perm.ResourceID)
+			resourceName = "部门ID: " + strconv.Itoa(perm.ResourceID)
 		} else if perm.ResourceType == "user" {
-			resourceName = "用户ID: " + string(perm.ResourceID)
+			resourceName = "用户ID: " + strconv.Itoa(perm.ResourceID)
 		}
 
 		result = append(result, model.MyPermissionView{
@@ -248,9 +244,9 @@ func (s *TempPermissionService) convertToView(perms []model.UserPermissionTemp) 
 		// 获取资源名称
 		resourceName := "全部"
 		if perm.ResourceType == "dept" {
-			resourceName = "部门ID: " + string(perm.ResourceID)
+			resourceName = "部门ID: " + strconv.Itoa(perm.ResourceID)
 		} else if perm.ResourceType == "user" {
-			resourceName = "用户ID: " + string(perm.ResourceID)
+			resourceName = "用户ID: " + strconv.Itoa(perm.ResourceID)
 		}
 
 		result = append(result, model.TempPermissionView{

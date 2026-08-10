@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"schedule-system-v2/backend/internal/auth"
 	"schedule-system-v2/backend/internal/dao"
 	"schedule-system-v2/backend/internal/model"
 )
@@ -137,7 +138,7 @@ func (e *TempPermissionExecutor) GetRequiredApprovers(ctx context.Context, app *
 
 	if isGlobalPermission(data.Permission) {
 		// 全局权限（如 user:manage:all, schedule:manage:all）→ 发给办公室管理员或系统管理员
-		officeAdmins, err := e.userDao.GetByDepartmentAndRole("办公室", "dept_admin")
+		officeAdmins, err := e.userDao.GetByDepartmentAndRole(model.DepartmentOffice, model.RoleDeptAdmin)
 		if err == nil {
 			for _, admin := range officeAdmins {
 				if admin.ID != app.ApplicantID {
@@ -146,7 +147,7 @@ func (e *TempPermissionExecutor) GetRequiredApprovers(ctx context.Context, app *
 			}
 		}
 		if len(approverIDs) == 0 {
-			admins, err := e.userDao.GetByRole("admin")
+			admins, err := e.userDao.GetByRole(model.RoleAdmin)
 			if err != nil {
 				return nil, err
 			}
@@ -158,7 +159,7 @@ func (e *TempPermissionExecutor) GetRequiredApprovers(ctx context.Context, app *
 		}
 	} else {
 		// 部门级权限 → 发给部门管理员，无则回退到办公室管理员或系统管理员
-		deptAdmins, err := e.userDao.GetByDepartmentAndRole(applicant.Department, "dept_admin")
+		deptAdmins, err := e.userDao.GetByDepartmentAndRole(applicant.Department, model.RoleDeptAdmin)
 		if err != nil {
 			return nil, err
 		}
@@ -168,7 +169,7 @@ func (e *TempPermissionExecutor) GetRequiredApprovers(ctx context.Context, app *
 			}
 		}
 		if len(approverIDs) == 0 {
-			officeAdmins, err := e.userDao.GetByDepartmentAndRole("办公室", "dept_admin")
+			officeAdmins, err := e.userDao.GetByDepartmentAndRole(model.DepartmentOffice, model.RoleDeptAdmin)
 			if err == nil {
 				for _, admin := range officeAdmins {
 					if admin.ID != app.ApplicantID {
@@ -178,7 +179,7 @@ func (e *TempPermissionExecutor) GetRequiredApprovers(ctx context.Context, app *
 			}
 		}
 		if len(approverIDs) == 0 {
-			admins, err := e.userDao.GetByRole("admin")
+			admins, err := e.userDao.GetByRole(model.RoleAdmin)
 			if err != nil {
 				return nil, err
 			}
@@ -206,7 +207,7 @@ func (e *TempPermissionExecutor) CanApply(ctx context.Context, userID int, data 
 	}
 
 	// 系统管理员不需要申请临时权限
-	if user.Role == "admin" {
+	if user.Role == model.RoleAdmin {
 		return false, "系统管理员无需申请临时权限"
 	}
 
@@ -247,7 +248,8 @@ func (e *TempPermissionExecutor) CanApply(ctx context.Context, userID int, data 
 }
 
 // GetAvailablePermissions 获取用户可申请的所有权限
-func GetAvailablePermissions(user *model.User) []map[string]string {
+// 基于用户的权限集合（角色权限 ∪ 临时权限）过滤已拥有的权限，不再依赖角色字符串判断。
+func GetAvailablePermissions(checker *auth.Checker) []map[string]string {
 	// 统一使用冒号格式与系统权限保持一致
 	allPermissions := []map[string]string{
 		{"key": "schedule:publish", "name": "设置每周分工", "description": "设置各部门在本周值班的日期安排"},
@@ -257,23 +259,21 @@ func GetAvailablePermissions(user *model.User) []map[string]string {
 		{"key": "user:manage:dept", "name": "用户管理（部门）", "description": "管理部门内用户"},
 	}
 
-	// 根据用户角色过滤已拥有的权限
+	// 根据权限集合过滤已拥有的权限
+	permMap := map[string]auth.Permission{
+		"schedule:publish":     auth.PermSchedulePublish,
+		"schedule:manage:all":  auth.PermScheduleManageAll,
+		"user:manage:all":      auth.PermUserManageAll,
+		"schedule:manage:dept": auth.PermScheduleManageDept,
+		"user:manage:dept":     auth.PermUserManageDept,
+	}
+
 	var available []map[string]string
 	for _, perm := range allPermissions {
-		hasPerm := false
-		if user.Role == "admin" {
-			hasPerm = true
-		} else if user.DeptRole == "dept_admin" {
-			// 部门管理员默认拥有部门级权限
-			switch perm["key"] {
-			case "schedule:manage:dept", "user:manage:dept", "schedule:publish":
-				hasPerm = true
-			}
+		if checker.HasPermission(permMap[perm["key"]]) {
+			continue
 		}
-
-		if !hasPerm {
-			available = append(available, perm)
-		}
+		available = append(available, perm)
 	}
 
 	return available

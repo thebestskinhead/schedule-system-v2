@@ -554,9 +554,9 @@ func (s *SystemService) CreateAdmin(studentID, name, email, password, department
 		StudentID:  studentID,
 		Name:       name,
 		Email:      email,
-		Role:       "admin",
+		Role:       model.RoleAdmin,
 		Department: department,
-		DeptRole:   "dept_admin",
+		DeptRole:   model.RoleDeptAdmin,
 		IsActive:   true,
 	}, nil
 }

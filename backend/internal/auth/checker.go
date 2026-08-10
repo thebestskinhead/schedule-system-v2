@@ -1,214 +1,224 @@
-// Package auth 提供handler层面的权限检查工具
 package auth
 
 import (
-	"net/http"
 	"schedule-system-v2/backend/internal/model"
 
 	"github.com/gin-gonic/gin"
 )
 
-// ContextKey 上下文键类型
-type ContextKey string
-
-const (
-	// ContextKeyUserID 用户ID上下文键
-	ContextKeyUserID ContextKey = "userID"
-	// ContextKeyStudentID 学号上下文键
-	ContextKeyStudentID ContextKey = "studentID"
-	// ContextKeyRole 角色上下文键
-	ContextKeyRole ContextKey = "role"
-	// ContextKeyDepartment 部门上下文键
-	ContextKeyDepartment ContextKey = "department"
-	// ContextKeyDeptRole 部门角色上下文键
-	ContextKeyDeptRole ContextKey = "deptRole"
-)
-
-// CurrentUser 当前登录用户信息
-type CurrentUser struct {
-	UserID     int
-	StudentID  string
-	Role       string
-	Department string
-	DeptRole   string
+// EffectivePerm 有效权限 = 权限 + 资源范围
+type EffectivePerm struct {
+	Permission   Permission
+	ResourceType string // "all" | "dept" | "user"，空 = 不限制
+	ResourceID   int
 }
 
-// GetCurrentUser 从上下文获取当前完整用户信息
-func GetCurrentUser(c *gin.Context) *CurrentUser {
-	return &CurrentUser{
-		UserID:     GetUserIDFromContext(c),
-		StudentID:  GetStudentIDFromContext(c),
-		Role:       GetRoleFromContext(c),
-		Department: GetDepartmentFromContext(c),
-		DeptRole:   GetDeptRoleFromContext(c),
-	}
+// Checker 权限检查器（唯一授权入口）
+// 权限来源：角色权限（RolePermissions）+ 临时权限（temp_permissions 表）
+type Checker struct {
+	userID     int
+	studentID  string
+	role       string // 原始 role 字段（admin/user）
+	department string
+	deptRole   string
+	tempPerms  []TempPermInfo // 缓存的临时权限（包含资源范围信息）
 }
 
-// GetUserIDFromContext 从上下文获取用户ID
-func GetUserIDFromContext(c *gin.Context) int {
-	userID, exists := c.Get("userID")
-	if !exists {
-		return 0
+// NewChecker 创建权限检查器
+func NewChecker(userID int, studentID, role, department, deptRole string) *Checker {
+	c := &Checker{
+		userID:     userID,
+		studentID:  studentID,
+		role:       role,
+		department: department,
+		deptRole:   deptRole,
+		tempPerms:  loadTempPermissions(userID),
 	}
-	uid, ok := userID.(int)
-	if !ok {
-		// 尝试float64（JSON数字默认类型）
-		if fuid, ok := userID.(float64); ok {
-			return int(fuid)
+	return c
+}
+
+// FromContext 从Gin上下文创建权限检查器
+func FromContext(c *gin.Context) *Checker {
+	return NewChecker(
+		GetUserIDFromContext(c),
+		GetStudentIDFromContext(c),
+		GetRoleFromContext(c),
+		GetDepartmentFromContext(c),
+		GetDeptRoleFromContext(c),
+	)
+}
+
+// GetUserID 获取用户ID
+func (c *Checker) GetUserID() int {
+	return c.userID
+}
+
+// GetStudentID 获取学号
+func (c *Checker) GetStudentID() string {
+	return c.studentID
+}
+
+// GetRole 获取原始角色
+func (c *Checker) GetRole() string {
+	return c.role
+}
+
+// GetDepartment 获取部门
+func (c *Checker) GetDepartment() string {
+	return c.department
+}
+
+// GetDeptRole 获取部门角色
+func (c *Checker) GetDeptRole() string {
+	return c.deptRole
+}
+
+// UnifiedRole 获取统一角色码
+func (c *Checker) UnifiedRole() string {
+	return ResolveRole(c.role, c.department, c.deptRole)
+}
+
+// EffectivePermissions 返回用户的完整有效权限集合（角色权限 ∪ 临时权限，权限组已展开）
+// 角色权限中部门级权限自动限定为用户所在部门。
+func (c *Checker) EffectivePermissions() []EffectivePerm {
+	perms := make([]EffectivePerm, 0, 32)
+
+	if c.IsAdmin() {
+		// 系统管理员：拥有全部权限（all 范围）
+		perms = append(perms, EffectivePerm{Permission: PermSystemAdmin, ResourceType: "all"})
+		for _, p := range RolePermissions[model.RoleAdmin] {
+			perms = append(perms, EffectivePerm{Permission: p, ResourceType: "all"})
 		}
-		return 0
+		return perms
 	}
-	return uid
-}
 
-// GetStudentIDFromContext 从上下文获取学号
-func GetStudentIDFromContext(c *gin.Context) string {
-	studentID, exists := c.Get("studentID")
-	if !exists {
-		return ""
+	// 1. 角色权限（统一角色）
+	role := c.UnifiedRole()
+	deptID := model.DepartmentID(c.department)
+	for _, p := range RolePermissions[role] {
+		rt := "all"
+		rid := 0
+		if deptScopedPermissions[p] && (role == model.RoleDeptAdmin || role == model.RoleDeptMember) {
+			rt = "dept"
+			rid = deptID
+		}
+		perms = append(perms, EffectivePerm{Permission: p, ResourceType: rt, ResourceID: rid})
 	}
-	sid, ok := studentID.(string)
-	if !ok {
-		return ""
-	}
-	return sid
-}
 
-// GetRoleFromContext 从上下文获取角色
-func GetRoleFromContext(c *gin.Context) string {
-	role, exists := c.Get("role")
-	if !exists {
-		return ""
-	}
-	r, ok := role.(string)
-	if !ok {
-		return ""
-	}
-	return r
-}
-
-// GetDepartmentFromContext 从上下文获取部门
-func GetDepartmentFromContext(c *gin.Context) string {
-	dept, exists := c.Get("department")
-	if !exists {
-		return ""
-	}
-	d, ok := dept.(string)
-	if !ok {
-		return ""
-	}
-	return d
-}
-
-// GetDeptRoleFromContext 从上下文获取部门角色
-func GetDeptRoleFromContext(c *gin.Context) string {
-	deptRole, exists := c.Get("deptRole")
-	if !exists {
-		return ""
-	}
-	dr, ok := deptRole.(string)
-	if !ok {
-		return ""
-	}
-	return dr
-}
-
-// CheckPermission 检查当前用户是否有指定权限
-// 在handler中使用: if !auth.CheckPermission(c, auth.PermScheduleEdit) { return }
-func CheckPermission(c *gin.Context, perm Permission) bool {
-	checker := GetChecker(c)
-	if !checker.HasPermission(perm) {
-		c.JSON(http.StatusForbidden, model.Response{
-			Code:    403,
-			Message: "无权限执行此操作",
+	// 2. 临时权限（带自身资源范围）
+	for _, tp := range c.tempPerms {
+		perms = append(perms, EffectivePerm{
+			Permission:   tp.Permission,
+			ResourceType: tp.ResourceType,
+			ResourceID:   tp.ResourceID,
 		})
+	}
+
+	return perms
+}
+
+// HasPermission 检查是否拥有指定权限（不限资源范围）
+func (c *Checker) HasPermission(perm Permission) bool {
+	if c.IsAdmin() {
+		return true
+	}
+	if c.role == "" && len(c.tempPerms) == 0 {
 		return false
+	}
+	for _, p := range c.EffectivePermissions() {
+		if p.Permission == perm || permImplies(p.Permission, perm) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasPermissionOn 检查是否拥有指定权限且资源范围匹配
+func (c *Checker) HasPermissionOn(perm Permission, resourceType string, resourceID int) bool {
+	if c.IsAdmin() {
+		return true
+	}
+	if c.role == "" && len(c.tempPerms) == 0 {
+		return false
+	}
+	for _, p := range c.EffectivePermissions() {
+		if p.Permission != perm && !permImplies(p.Permission, perm) {
+			continue
+		}
+		if p.ResourceType == "all" || p.ResourceType == "" {
+			return true
+		}
+		if p.ResourceType == resourceType && (resourceID == 0 || p.ResourceID == resourceID) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasAnyPermission 检查是否有任意一个权限
+func (c *Checker) HasAnyPermission(perms ...Permission) bool {
+	for _, perm := range perms {
+		if c.HasPermission(perm) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasAllPermissions 检查是否拥有所有权限
+func (c *Checker) HasAllPermissions(perms ...Permission) bool {
+	for _, perm := range perms {
+		if !c.HasPermission(perm) {
+			return false
+		}
 	}
 	return true
 }
 
-// CheckDeptPermission 检查当前用户是否有指定部门的指定权限
-// 在handler中使用: if !auth.CheckDeptPermission(c, auth.PermScheduleManageDept, "办公室") { return }
-func CheckDeptPermission(c *gin.Context, perm Permission, dept string) bool {
-	checker := GetChecker(c)
-	if !checker.HasDeptPermission(perm, dept) {
-		c.JSON(http.StatusForbidden, model.Response{
-			Code:    403,
-			Message: "无权访问该部门资源",
-		})
+// IsAdmin 检查是否是系统管理员（唯一内建角色短路）
+func (c *Checker) IsAdmin() bool {
+	return c.role == model.RoleAdmin
+}
+
+// IsOwner 检查是否是资源所有者（通过学号）
+func (c *Checker) IsOwner(targetStudentID string) bool {
+	return c.studentID == targetStudentID
+}
+
+// CanAccessDept 检查是否可以访问指定部门（统一部门访问判定）
+// 拥有任意"部门级权限"且资源范围覆盖该部门即可访问。
+func (c *Checker) CanAccessDept(dept string) bool {
+	if c.IsAdmin() {
+		return true
+	}
+	if c.role == "" && len(c.tempPerms) == 0 {
 		return false
 	}
-	return true
-}
-
-// CheckOwnerOrAdmin 检查是否是资源所有者或管理员
-// 在handler中使用: if !auth.CheckOwnerOrAdmin(c, targetStudentID) { return }
-func CheckOwnerOrAdmin(c *gin.Context, targetStudentID string) bool {
-	checker := GetChecker(c)
-	if !checker.IsAdmin() && checker.GetStudentID() != targetStudentID {
-		c.JSON(http.StatusForbidden, model.Response{
-			Code:    403,
-			Message: "无权访问此资源",
-		})
-		return false
+	deptID := model.DepartmentID(dept)
+	for _, p := range c.EffectivePermissions() {
+		if !isDeptAccessPermission(p.Permission) {
+			continue
+		}
+		if p.ResourceType == "all" || p.ResourceType == "" {
+			return true
+		}
+		if p.ResourceType == "dept" && (p.ResourceID == 0 || p.ResourceID == deptID) {
+			return true
+		}
 	}
-	return true
+	return false
 }
 
-// RequireAdmin 要求系统管理员权限
-func RequireAdmin(c *gin.Context) bool {
-	return CheckPermission(c, PermSystemAdmin)
+// GetTempPermissions 获取用户的临时权限列表
+func (c *Checker) GetTempPermissions() []TempPermInfo {
+	return c.tempPerms
 }
 
-// RequireOfficeAdmin 要求办公室管理员权限
-func RequireOfficeAdmin(c *gin.Context) bool {
-	checker := GetChecker(c)
-	if !checker.IsOfficeAdmin() && !checker.IsAdmin() {
-		c.JSON(http.StatusForbidden, model.Response{
-			Code:    403,
-			Message: "需要办公室管理员权限",
-		})
-		return false
+// GetTempPermissionNames 获取用户的临时权限名称列表
+func (c *Checker) GetTempPermissionNames() []Permission {
+	perms := make([]Permission, 0, len(c.tempPerms))
+	for _, p := range c.tempPerms {
+		perms = append(perms, p.Permission)
 	}
-	return true
-}
-
-// GetChecker 从上下文获取权限检查器
-func GetChecker(c *gin.Context) *Checker {
-	userID := GetUserIDFromContext(c)
-	studentID := GetStudentIDFromContext(c)
-	role := GetRoleFromContext(c)
-	department := GetDepartmentFromContext(c)
-	deptRole := GetDeptRoleFromContext(c)
-	return NewChecker(userID, studentID, role, department, deptRole)
-}
-
-// CheckAPIAccess 检查API访问权限（传入学号和接口路径）
-// 返回布尔值表示是否允许访问
-func CheckAPIAccess(studentID string, apiPath string) bool {
-	return Check(studentID, apiPath)
-}
-
-// ResponseForbidden 返回权限不足响应
-func ResponseForbidden(c *gin.Context, message ...string) {
-	msg := "无权限执行此操作"
-	if len(message) > 0 && message[0] != "" {
-		msg = message[0]
-	}
-	c.JSON(http.StatusForbidden, model.Response{
-		Code:    403,
-		Message: msg,
-	})
-}
-
-// ResponseUnauthorized 返回未认证响应
-func ResponseUnauthorized(c *gin.Context, message ...string) {
-	msg := "未登录或登录已过期"
-	if len(message) > 0 && message[0] != "" {
-		msg = message[0]
-	}
-	c.JSON(http.StatusUnauthorized, model.Response{
-		Code:    401,
-		Message: msg,
-	})
+	return perms
 }
