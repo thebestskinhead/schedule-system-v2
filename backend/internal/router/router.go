@@ -74,7 +74,6 @@ func SetupRouter() *gin.Engine {
 		User:         handler.NewUserHandler(),
 		Availability: handler.NewAvailabilityHandler(),
 		Schedule:     handler.NewScheduleHandler(),
-		Crawler:      handler.NewCrawlerHandler(),
 		Template:     handler.NewTemplateHandler(),
 		WeeklyDuty:   handler.NewWeeklyDutyHandler(),
 		TempPerm:     handler.NewTempPermissionHandler(),

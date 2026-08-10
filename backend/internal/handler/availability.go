@@ -98,39 +98,6 @@ func (h *AvailabilityHandler) DeleteAvailability(c *gin.Context) {
 	utils.Success(c, nil)
 }
 
-// ImportFromCookie 从Cookie导入课表（异步队列模式）
-func (h *AvailabilityHandler) ImportFromCookie(c *gin.Context) {
-	userID := auth.GetUserIDFromContext(c)
-	if userID == 0 {
-		auth.ResponseUnauthorized(c)
-		return
-	}
-
-	var req struct {
-		Cookies  string `json:"cookies" binding:"required"`
-		Semester string `json:"semester" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.Error(c, http.StatusBadRequest, "参数错误: "+err.Error())
-		return
-	}
-
-	// 提交到任务队列
-	queue := service.GetTaskQueue()
-	task, err := queue.SubmitTask(userID, req.Cookies, req.Semester)
-	if err != nil {
-		utils.Error(c, http.StatusTooManyRequests, err.Error())
-		return
-	}
-
-	utils.Success(c, gin.H{
-		"task_id":    task.ID,
-		"status":     task.Status,
-		"message":    "任务已提交，请通过任务ID查询进度",
-		"created_at": task.CreatedAt,
-	})
-}
-
 // GetImportTaskStatus 获取导入任务状态
 func (h *AvailabilityHandler) GetImportTaskStatus(c *gin.Context) {
 	userID := auth.GetUserIDFromContext(c)
@@ -142,7 +109,7 @@ func (h *AvailabilityHandler) GetImportTaskStatus(c *gin.Context) {
 
 	queue := service.GetTaskQueue()
 
-	var task *service.CookieImportTask
+	var task *service.ImportTask
 	var found bool
 
 	if taskID != "" {

@@ -26,7 +26,6 @@ type Handlers struct {
 	User         *handler.UserHandler
 	Availability *handler.AvailabilityHandler
 	Schedule     *handler.ScheduleHandler
-	Crawler      *handler.CrawlerHandler
 	Template     *handler.TemplateHandler
 	WeeklyDuty   *handler.WeeklyDutyHandler
 	TempPerm     *handler.TempPermissionHandler
@@ -68,15 +67,10 @@ func buildRoutes(h *Handlers) []RouteDef {
 		{Method: "POST", Path: "/availability", Auth: true, Perms: []auth.Permission{auth.PermAvailabilityEdit}, Handler: h.Availability.AddAvailability},
 		{Method: "GET", Path: "/availability", Auth: true, Perms: []auth.Permission{auth.PermAvailabilityView}, Handler: h.Availability.GetMyAvailability},
 		{Method: "DELETE", Path: "/availability", Auth: true, Perms: []auth.Permission{auth.PermAvailabilityEdit}, Handler: h.Availability.DeleteAvailability},
-		{Method: "POST", Path: "/availability/import/cookie", Auth: true, Perms: []auth.Permission{auth.PermAvailabilityImport}, Handler: h.Availability.ImportFromCookie},
 		{Method: "POST", Path: "/availability/import/xls", Auth: true, Perms: []auth.Permission{auth.PermAvailabilityImport}, Handler: h.Availability.ImportFromXLS},
 		{Method: "POST", Path: "/availability/import/xls-base64", Auth: true, Perms: []auth.Permission{auth.PermAvailabilityImport}, Handler: h.Availability.ImportFromXLSBase64},
 		{Method: "GET", Path: "/availability/import/status", Auth: true, Perms: []auth.Permission{auth.PermAvailabilityImport}, Handler: h.Availability.GetImportTaskStatus},
 		{Method: "GET", Path: "/availability/import/tasks", Auth: true, Perms: []auth.Permission{auth.PermAvailabilityImport}, Handler: h.Availability.GetImportTaskList},
-
-		// ========== 爬虫导入 ==========
-		{Method: "POST", Path: "/crawler/import", Auth: true, Perms: []auth.Permission{auth.PermAvailabilityImport}, Handler: h.Crawler.CrawlSchedule},
-		{Method: "POST", Path: "/crawler/preview", Auth: true, Perms: []auth.Permission{auth.PermAvailabilityImport}, Handler: h.Crawler.PreviewSchedule},
 
 		// ========== 排班查看 ==========
 		{Method: "GET", Path: "/schedule", Auth: true, Perms: []auth.Permission{auth.PermScheduleView}, Handler: h.Schedule.GetSchedule},

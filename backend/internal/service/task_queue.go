@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 	"sync"
 	"time"
@@ -25,7 +24,6 @@ const (
 type ImportType string
 
 const (
-	ImportTypeCookie ImportType = "cookie" // Cookie爬虫导入
 	ImportTypeExcel  ImportType = "excel"  // Excel文件导入
 	ImportTypeManual ImportType = "manual" // 手动录入
 )
@@ -44,10 +42,6 @@ type ImportTask struct {
 	RetryCount int           `json:"retry_count"`
 	MaxRetries int           `json:"max_retries"`
 
-	// Cookie导入参数
-	Cookies  string `json:"-"`
-	Semester string `json:"semester,omitempty"`
-
 	// Excel导入参数
 	FilePath string `json:"-"` // 临时文件路径
 
@@ -65,12 +59,6 @@ type ImportResult struct {
 	AvailableCells int `json:"available_cells,omitempty"`
 	Imported       int `json:"imported"`
 }
-
-// CookieImportTask 保留用于兼容（实际使用ImportTask）
-type CookieImportTask = ImportTask
-
-// CookieImportResult 保留用于兼容
-type CookieImportResult = ImportResult
 
 // TaskQueue 任务队列
 type TaskQueue struct {
@@ -114,43 +102,6 @@ func NewTaskQueue(maxWorkers, maxQueueSize int) *TaskQueue {
 	}
 
 	return q
-}
-
-// SubmitTask 提交Cookie导入任务（兼容旧接口）
-func (q *TaskQueue) SubmitTask(userID int, cookies, semester string) (*ImportTask, error) {
-	return q.SubmitCookieTask(userID, cookies, semester)
-}
-
-// SubmitCookieTask 提交Cookie导入任务
-func (q *TaskQueue) SubmitCookieTask(userID int, cookies, semester string) (*ImportTask, error) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	if q.stopped {
-		return nil, fmt.Errorf("任务队列已停止")
-	}
-
-	// 检查用户是否已有进行中的任务
-	if q.hasRunningTaskLocked(userID) {
-		return nil, fmt.Errorf("已有进行中的导入任务")
-	}
-
-	// 创建任务
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	task := &ImportTask{
-		ID:         generateTaskID(),
-		Type:       ImportTypeCookie,
-		UserID:     userID,
-		Status:     TaskStatusPending,
-		Cookies:    cookies,
-		Semester:   semester,
-		CreatedAt:  time.Now(),
-		MaxRetries: 3,
-		ctx:        ctx,
-		cancel:     cancel,
-	}
-
-	return q.enqueueTaskLocked(task)
 }
 
 // SubmitExcelTask 提交Excel导入任务
@@ -319,8 +270,6 @@ func (q *TaskQueue) processTask(task *ImportTask) {
 	var err error
 
 	switch task.Type {
-	case ImportTypeCookie:
-		result, err = q.executeCookieImport(task)
 	case ImportTypeExcel:
 		result, err = q.executeExcelImport(task)
 	case ImportTypeManual:
@@ -348,76 +297,6 @@ func (q *TaskQueue) processTask(task *ImportTask) {
 	if task.cancel != nil {
 		task.cancel()
 	}
-}
-
-// executeCookieImport 执行Cookie导入
-func (q *TaskQueue) executeCookieImport(task *ImportTask) (*ImportResult, error) {
-	var lastErr error
-
-	for attempt := 0; attempt <= task.MaxRetries; attempt++ {
-		if attempt > 0 {
-			task.RetryCount = attempt
-			backoff := time.Duration(attempt) * 5 * time.Second
-			time.Sleep(backoff)
-		}
-
-		select {
-		case <-task.ctx.Done():
-			return nil, fmt.Errorf("任务超时或取消")
-		default:
-		}
-
-		result, err := q.doCookieImport(task)
-		if err == nil {
-			return result, nil
-		}
-
-		lastErr = err
-
-		if attempt < task.MaxRetries {
-			q.mu.Lock()
-			task.Status = TaskStatusRunning
-			q.mu.Unlock()
-		}
-	}
-
-	return nil, fmt.Errorf("重试%d次后失败: %w", task.MaxRetries, lastErr)
-}
-
-// doCookieImport 实际执行Cookie导入
-func (q *TaskQueue) doCookieImport(task *ImportTask) (*ImportResult, error) {
-	crawler := &EduCrawler{
-		client: &http.Client{
-			Timeout: 60 * time.Second,
-		},
-		cookies: task.Cookies,
-	}
-
-	scheduleMap, err := crawler.CrawlSchedule(task.Semester)
-	if err != nil {
-		return nil, err
-	}
-
-	availabilities := ConvertToAvailability(task.UserID, scheduleMap)
-
-	if len(availabilities) > 0 {
-		service := NewAvailabilityService()
-		if err := service.DeleteByUserID(task.UserID); err != nil {
-			return nil, fmt.Errorf("删除旧记录失败: %w", err)
-		}
-		if err := service.CreateBatch(task.UserID, availabilities); err != nil {
-			return nil, fmt.Errorf("保存无课时间失败: %w", err)
-		}
-	}
-
-	totalCells := len(scheduleMap) * 5 * 4
-
-	return &ImportResult{
-		WeeksParsed:    len(scheduleMap),
-		TotalCells:     totalCells,
-		AvailableCells: len(availabilities),
-		Imported:       len(availabilities),
-	}, nil
 }
 
 // executeExcelImport 执行Excel导入
