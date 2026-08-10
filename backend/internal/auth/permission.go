@@ -513,7 +513,7 @@ func (c *Checker) CanAccessPath(path string) bool {
 	perm, exists := PathPermissionMap[path]
 	if !exists {
 		// 未配置的默认允许访问（或者可以改为默认拒绝）
-		return true
+		return false
 	}
 	return c.HasPermission(perm)
 }
