@@ -28,6 +28,10 @@
 
 **标识**: `department="办公室"` + `dept_role="dept_admin"`
 
+**注意**: 办公室管理员不是存储角色（`users.role` 仅允许 `admin/user`），而是**派生身份**。
+当用户 `department="办公室"` 且 `dept_role="dept_admin"` 时，鉴权层自动附加全局管理权限集
+（见 `auth/roles.go` 的 `officeAdminPermissions`）。因此一个部门可以有多个部门管理员，办公室亦然。
+
 **权限范围**:
 - 管理所有部门的排班
 - 管理所有用户（不含系统角色设置）
@@ -253,24 +257,18 @@ user:manage:all (用户管理-全部)
 ### CanManageDept 检查流程
 
 ```go
-func CanManageDept(dept string) bool {
-    // 1. 系统管理员
-    if IsAdmin() return true
-    
-    // 2. 办公室管理员
-    if IsOfficeAdmin() return true
-    
-    // 3. 部门管理员（本部门）
-    if IsDeptAdmin() && department == dept return true
-    
-    // 4. 临时权限检查
-    // 4.1 全局排班权限
-    if hasTempPermission(schedule:manage:all) return true
-    
-    // 4.2 部门排班权限（本部门）
-    if HasTempPermissionForDept(schedule:manage:dept, dept) return true
-    
-    return false
+func (c *auth.Checker) CanAccessDept(dept string) bool {
+    // 1. 系统管理员（唯一内建角色短路）
+    if c.IsAdmin() return true
+
+    // 2. 办公室管理员（派生身份）：department=办公室 && dept_role=dept_admin
+    //    → EffectivePermissions 附加全局权限集（all 范围），自动覆盖任意部门
+
+    // 3. 部门管理员/成员：部门级权限自动限定为本部门（dept 范围）
+
+    // 4. 临时权限：按自身资源范围（all/dept/user）参与同一判定
+
+    // 统一入口：c.EffectivePermissions() → HasPermissionOn / CanAccessDept
 }
 ```
 
@@ -363,7 +361,7 @@ system:admin (系统管理员)
     ├── 可以设置系统角色
     └── 可以审批所有权限申请
 
-office_admin (办公室管理员)
+office_admin (办公室管理员：派生身份，department=办公室 + dept_role=dept_admin，非存储角色)
     ├── schedule:manage:all
     ├── user:manage:all
     ├── schedule:publish

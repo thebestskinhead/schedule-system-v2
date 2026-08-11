@@ -112,10 +112,10 @@ func (h *Handler) GetUserDetail(c *gin.Context) {
 
 | 角色 | 标识 | 权限范围 |
 |------|------|---------|
-| 系统管理员 | `role=admin` | 全部权限 |
-| 办公室管理员 | `department=办公室, dept_role=admin` | 发布每周分工、查看所有部门 |
-| 部门管理员 | `dept_role=admin` | 管理部门内用户和排班 |
-| 部门成员 | `dept_role=member` | 查看本部门信息、管理个人数据 |
+| 系统管理员 | `role=admin`（唯一特殊身份，系统引导创建） | 全部权限（含设置系统角色） |
+| 办公室管理员 | `department=办公室` + `dept_role=dept_admin`（派生身份，非存储角色） | 全局排班/用户管理权限（不含设置系统角色） |
+| 部门管理员 | `dept_role=dept_admin` | 管理本部门用户和排班 |
+| 部门成员 | `dept_role=dept_member` | 查看本部门信息、管理个人数据 |
 
 ## 权限列表
 
@@ -158,19 +158,17 @@ admin.POST("/schedule/publish", middleware.PermissionMiddleware(auth.PermSchedul
 checker := auth.GetChecker(c)
 
 // 角色检查
-checker.IsAdmin()        // 是否是系统管理员
-checker.IsOfficeAdmin()  // 是否是办公室管理员
-checker.IsDeptAdmin()    // 是否是部门管理员
+checker.IsAdmin()        // 是否是系统管理员（唯一特殊身份）
+checker.UnifiedRole()    // 统一角色码：admin / dept_admin / dept_member / user
 
 // 部门访问检查
-checker.CanManageDept("办公室")  // 是否可以管理指定部门
-checker.CanViewDept("办公室")    // 是否可以查看指定部门
+checker.CanAccessDept("办公室")  // 是否可以访问指定部门（权限 + 资源范围统一判定）
 
 // 权限检查
 checker.HasPermission(auth.PermScheduleEdit)
 checker.HasAnyPermission(auth.PermScheduleEdit, auth.PermScheduleView)
 checker.HasAllPermissions(auth.PermScheduleEdit, auth.PermScheduleView)
-checker.HasDeptPermission(auth.PermScheduleManageDept, "办公室")
+checker.HasPermissionOn(auth.PermScheduleManageDept, "dept", model.DepartmentID("办公室"))
 
 // 资源所有权
 checker.IsOwner(targetStudentID)
@@ -200,7 +198,7 @@ auth.ResponseUnauthorized(c, "自定义错误消息")
 
 1. 在 `permission.go` 中定义新权限常量
 2. 在 `RolePermissions` 中为对应角色分配权限
-3. 在 `PathPermissionMap` 中映射API路径（可选）
+3. 在 `router/routes.go` 的路由表中绑定权限（可选）
 
 ### 添加新角色
 

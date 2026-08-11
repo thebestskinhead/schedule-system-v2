@@ -6,7 +6,7 @@
           {{ isGlobalAdmin ? '用户管理' : '部门用户管理' }}
           <el-tag v-if="!isGlobalAdmin" size="small" type="info" style="margin-left: 8px">{{ userStore.user?.department }}</el-tag>
         </span>
-        <el-button v-if="isGlobalAdmin" type="primary" @click="createUser">新增用户</el-button>
+        <el-button v-if="isGlobalAdmin" type="primary" @click="openCreateDialog">新增用户</el-button>
       </div>
 
       <el-table :data="userList" v-loading="loading" class="data-table">
@@ -164,8 +164,6 @@ const openCreateDialog = () => {
   })
   dialogVisible.value = true
 }
-
-const createUser2 = openCreateDialog
 
 const editUser = (row) => {
   isEdit.value = true

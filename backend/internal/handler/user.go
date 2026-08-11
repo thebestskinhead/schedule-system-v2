@@ -446,6 +446,12 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 		return
 	}
 
+	// 系统管理员角色只能由拥有 user:set_role 权限的身份（系统管理员）创建
+	if req.Role == model.RoleAdmin && !checker.HasPermission(auth.PermUserSetRole) {
+		auth.ResponseForbidden(c, "无权创建系统管理员")
+		return
+	}
+
 	user, err := h.service.AdminCreateUser(&req)
 	if err != nil {
 		utils.Error(c, 403, err.Error())
@@ -508,6 +514,18 @@ func (h *UserHandler) AdminUpdateUser(c *gin.Context) {
 		req.Department = targetUser.Department
 		req.Role = targetUser.Role
 		req.DeptRole = targetUser.DeptRole
+	} else if !checker.HasPermission(auth.PermUserSetRole) {
+		// 全局管理员但非系统管理员（如办公室管理员）：不能修改系统管理员，也不能修改系统角色
+		targetUser, err := h.service.GetUserByID(userID)
+		if err != nil {
+			utils.Error(c, 404, "用户不存在")
+			return
+		}
+		if targetUser.Role == model.RoleAdmin {
+			auth.ResponseForbidden(c, "无权修改系统管理员")
+			return
+		}
+		req.Role = targetUser.Role
 	}
 
 	// 不能修改自己的角色/部门（防止临时权限提权）
@@ -563,6 +581,17 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 		}
 		if targetUser.Department != checker.GetDepartment() {
 			auth.ResponseForbidden(c, "只能删除本部门用户")
+			return
+		}
+		if targetUser.Role == model.RoleAdmin {
+			auth.ResponseForbidden(c, "无权删除系统管理员")
+			return
+		}
+	} else if !checker.HasPermission(auth.PermUserSetRole) {
+		// 全局管理员但非系统管理员（如办公室管理员）：不能删除系统管理员
+		targetUser, err := h.service.GetUserByID(userID)
+		if err != nil {
+			utils.Error(c, 404, "用户不存在")
 			return
 		}
 		if targetUser.Role == model.RoleAdmin {

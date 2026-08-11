@@ -73,7 +73,7 @@ func (c *Checker) GetDeptRole() string {
 	return c.deptRole
 }
 
-// UnifiedRole 获取统一角色码
+// UnifiedRole 获取统一角色码（admin / dept_admin / dept_member / user）
 func (c *Checker) UnifiedRole() string {
 	return ResolveRole(c.role, c.department, c.deptRole)
 }
@@ -103,6 +103,15 @@ func (c *Checker) EffectivePermissions() []EffectivePerm {
 			rid = deptID
 		}
 		perms = append(perms, EffectivePerm{Permission: p, ResourceType: rt, ResourceID: rid})
+	}
+
+	// 1.5 办公室管理员派生身份：department=办公室 && dept_role=dept_admin → 附加全局管理权限集。
+	// office_admin 不是存储角色（users.role 仅允许 admin/user），此判定在部门角色（dept_admin）
+	// 权限基础上叠加全局权限（all 范围），全局权限自动覆盖任意部门，等价于旧 office_admin 角色码查表。
+	if c.department == model.DepartmentOffice && c.deptRole == model.RoleDeptAdmin {
+		for _, p := range officeAdminPermissions {
+			perms = append(perms, EffectivePerm{Permission: p, ResourceType: "all"})
+		}
 	}
 
 	// 2. 临时权限（带自身资源范围）

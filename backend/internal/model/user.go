@@ -17,15 +17,17 @@ type User struct {
 	UpdatedAt  time.Time `json:"updated_at" db:"updated_at"`
 }
 
-// UserRole 统一角色常量（单一角色体系）
-// 说明：系统采用统一角色体系，用户通过 role 字段标识唯一角色；
-// 为兼容旧数据，role=admin 视为系统管理员，其余用户通过 dept_role+department 解析出部门角色。
+// UserRole 角色常量（单一角色体系）
+// users.role 字段仅允许 admin/user：admin 为系统管理员（唯一特殊身份，系统引导创建），user 为普通用户。
+// users.dept_role 字段仅允许 dept_admin/dept_member。
+// "办公室管理员"（office_admin）不是存储角色，而是派生身份：department=办公室 && dept_role=dept_admin，
+// 其权限由 auth 包 EffectivePermissions 按该派生规则附加（见 auth/roles.go officeAdminPermissions），
+// 禁止把 office_admin 写入 users.role。
 const (
-	RoleAdmin       = "admin"        // 系统管理员（拥有全部权限）
-	RoleOfficeAdmin = "office_admin" // 办公室管理员
-	RoleDeptAdmin   = "dept_admin"   // 部门管理员
-	RoleDeptMember  = "dept_member"  // 部门成员
-	RoleUser        = "user"         // 普通用户
+	RoleAdmin      = "admin"       // 系统管理员（拥有全部权限；应为系统引导创建的唯一特殊身份）
+	RoleDeptAdmin  = "dept_admin"  // 部门管理员
+	RoleDeptMember = "dept_member" // 部门成员
+	RoleUser       = "user"        // 普通用户
 )
 
 // DepartmentOffice 办公室部门名（办公室管理员所在部门）

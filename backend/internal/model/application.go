@@ -80,7 +80,7 @@ type Option struct {
 // FlowStep 审批流程步骤
 type FlowStep struct {
 	Level    int    `json:"level"`
-	Role     string `json:"role"` // admin, dept_admin, office_admin, specific
+	Role     string `json:"role"` // 审批流角色类型（admin/dept_admin/office_admin/specific），非用户存储角色
 	Label    string `json:"label"`
 	Optional bool   `json:"optional"`
 }
