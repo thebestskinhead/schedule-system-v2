@@ -71,6 +71,12 @@ func (s *UserService) Login(req *model.LoginRequest) (*model.LoginResponse, erro
 		return nil, errors.New("用户不存在")
 	}
 
+	// 显式校验账号状态：DAO 层已过滤 is_active=1，此处防御性复查，
+	// 确保即使查询条件变更，被禁用账号也无法登录
+	if !user.IsActive {
+		return nil, errors.New("账号已被禁用，请联系管理员")
+	}
+
 	if !utils.CheckPassword(req.Password, user.Password) {
 		return nil, errors.New("密码错误")
 	}

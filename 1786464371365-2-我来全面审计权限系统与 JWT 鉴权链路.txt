@@ -1,0 +1,48 @@
+我来全面审计权限系统与 JWT 鉴权链路，重点排查架构演化可能引入的绕过路径。
+发现关键线索。继续深挖：前端 token 存储、路由权限表、登录逻辑、QR 登录。
+再确认登录服务、前端 token 存储，以及 QR 登录轮询是否防伪。
+让我确认几个最关键的攻击面：系统初始化接口是否有防护、应用审批 handler 的权限校验、以及 checkToken。
+让我确认 `checkToken` 接口与登录时 `is_active` 校验、以及 `password/reset` 接口的校验。
+再确认两个关键点：默认 secret 是否会被实际使用（configs 目录）、密码重置流程。
+权限系统审计完成。结论先行：**前端鉴权确实 100% 依赖 JWT，但"无法攻击"不成立**——正如你预感的，问题不在 JWT 生成/校验、前端存储、CORS 这些常见攻击面，而在**权限判定信任 JWT 中的角色快照，而非数据库权威数据**。这是从"简单 role 字段"演化到"dept_role+department 组合解析角色"的架构遗留问题。
+
+## 审计报告
+
+### 攻击面分级
+
+| 级别 | 问题 | 位置 | 后果 |
+|---|---|---|---|
+| **🔴 致命** | JWT `role` claim 被直接用于 `Checker.IsAdmin()`，权限判定**不查库** | `checker.go:180` + `middleware.go:151-155` | 若 secret 泄露/默认值未改，攻击者**自己签发 `role=admin` 的 token 即完全接管系统** |
+| **🔴 致命** | `Login` **不检查 `user.IsActive`** | `user.go:68-95` | 与 `AdminDeleteUser` 注释"已禁用的用户无法登录"**矛盾**——被禁用用户仍可登录 |
+| **🟠 高危** | 权限依赖 JWT 快照，降权/禁用/离职**不即时生效** | `AuthMiddleware` 把 claims 写入 context，`FromContext` 直接消费 | 被降权/离职的用户，**已签发的 token 在 7 天（默认 expire=168h）内仍拥有原权限**；无 token 撤销机制 |
+| **🟠 高危** | JWT secret：代码硬编码默认 `schedule-system-secret-key`，`config.yaml` 中为 `dev-test-secret-key-change-me` | `config.go:177` + `config.yaml:12` | 部署时未改则所有实例共享已知 secret → 可伪造任意身份 |
+| **🟡 中** | `ParseToken` 未限定 `jwt.WithValidMethods` | `jwt.go:45` | 算法混淆（实际低危，库默认拒 `none`，但应加固） |
+| **🟡 中** | token 存 `localStorage` | `frontend user.js:8` | XSS 即可窃取 token（常见面，非本系统特有） |
+| **🟢 低** | QR `/qr/login/poll`、`/system/test-db`、`/system/check-db` 公开无频率限制 | `routes.go:42-56` | 可暴力探测、内网 DB 信息探测 |
+
+### 正确的地方（无需改动）
+- **临时权限**：`loadTempPermissions` **每次请求查库**（`temp_perm.go` + DAO 过滤 `is_active AND expires_at>NOW()`）——实时、正确
+- **CORS**：`Access-Control-Allow-Origin: *` + Bearer token（非 cookie），无 `Allow-Credentials`，CSRF 面小，搭配合理
+- **审批流判定**：`application.go:400` 的 office_admin 判断**基于查库的用户信息**，符合上轮结论
+- **路由权限表**：`buildRoutes` 表驱动，主流程权限中间件覆盖完整
+
+### 根因（你说"架构演化导致"是对的）
+
+```
+登录时：users 表(role/dept_role/department) ──签发──▶ JWT claims（快照）
+                                               │
+每次请求：AuthMiddleware ──取出 claims──▶ Checker 直接信任 ──▶ 权限判定
+                                               ▲
+                                    没有回到数据库验证最新状态
+```
+
+角色体系从 `role=admin/user` 演化到 `dept_role` 组合解析后，**JWT 载荷里的角色仍是签发时固化的旧值**，权限系统却把它当作唯一依据——降权、禁用、离职全部失效。
+
+## 修复方案（三处核心 + 加固）
+
+1. **`Login` 增加 `is_active` 校验**（一行，立即修复禁用可登录漏洞）
+2. **`AuthMiddleware` 验签后从数据库重载用户**：检查 `is_active=1`，并用**数据库中的** role/department/deptRole 构建 Checker（而非 claims）——权限变更即时生效，禁用即时失效
+3. **`ParseToken` 加 `jwt.WithValidMethods([]string{"HS256"})`** 固定算法
+4. 加固项（可选）：token 版本号实现即时撤销、移除硬编码默认 secret、QR poll 限流
+
+其中 1、2 彻底解决"权限快照"根因，且改动集中在 `middleware.go` + `user.go`，不动表结构。**确认后我立即实施 1+2+3**，加固项按需再做。

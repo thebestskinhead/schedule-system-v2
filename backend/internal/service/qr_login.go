@@ -227,6 +227,15 @@ func (s *QRLoginService) Poll(sessionID string) *model.QRPollResponse {
 		// 查系统数据库
 		user, err := s.userDAO.GetByStudentID(userInfo.StudentID)
 		if err == nil && user != nil {
+			// 显式校验账号状态：被禁用账号不能通过扫码登录
+			if !user.IsActive {
+				session.SetResult(model.QRStatusError, "账号已被禁用，请联系管理员")
+				session.ExpiresAt = time.Now().Add(30 * time.Second)
+				return &model.QRPollResponse{
+					Status:  model.QRStatusError,
+					Message: "账号已被禁用，请联系管理员",
+				}
+			}
 			// 已注册，生成 JWT
 			token, err := utils.GenerateToken(user.ID, user.StudentID, user.Role, user.Department, user.DeptRole)
 			if err != nil {
