@@ -1,9 +1,12 @@
 package service
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"schedule-system-v2/backend/internal/auth"
 	"schedule-system-v2/backend/internal/dao"
+	"schedule-system-v2/backend/internal/db"
 	"schedule-system-v2/backend/internal/model"
 )
 
@@ -23,31 +26,50 @@ func (s *WeeklyDutyService) PublishAssignment(adminID int, req *model.PublishAss
 		return errors.New("周次必须在1-30之间")
 	}
 
-	// 转换为批量创建
-	var assignments []*model.WeeklyDutyAssignment
+	// 序列化与 sp_publish_weekly_assignments 的 JSON_TABLE 解析字段一致：
+	// department / weekday / is_assigned(以 0/1 表达)
+	type assignmentItem struct {
+		Department string `json:"department"`
+		Weekday    int    `json:"weekday"`
+		IsAssigned int    `json:"is_assigned"`
+	}
+	items := make([]assignmentItem, 0, len(req.Assignments))
 	for _, detail := range req.Assignments {
 		if detail.Weekday < 1 || detail.Weekday > 5 {
 			continue // 跳过无效的星期
 		}
-		assignments = append(assignments, &model.WeeklyDutyAssignment{
-			Week:       req.Week,
+		v := 0
+		if detail.IsAssigned {
+			v = 1
+		}
+		items = append(items, assignmentItem{
 			Department: detail.Department,
 			Weekday:    detail.Weekday,
-			IsAssigned: detail.IsAssigned,
-			CreatedBy:  adminID,
+			IsAssigned: v,
 		})
 	}
 
-	if len(assignments) == 0 {
+	if len(items) == 0 {
 		return errors.New("没有有效的分工数据")
 	}
 
-	// 先删除该周的所有旧记录，再插入新记录
-	if err := s.dao.DeleteByWeek(req.Week); err != nil {
+	itemsJSON, err := json.Marshal(items)
+	if err != nil {
 		return err
 	}
 
-	return s.dao.CreateBatch(assignments)
+	err = db.WithRetry(context.Background(), func() error {
+		_, e := db.GetDB().Exec("CALL sp_publish_weekly_assignments(?, ?, ?)", req.Week, adminID, string(itemsJSON))
+		return e
+	})
+	if err != nil {
+		if biz, ok := db.BusinessErrorFromSQLError(err); ok {
+			return biz
+		}
+		return err
+	}
+
+	return nil
 }
 
 // GetWeekAssignments 获取指定周次的分工

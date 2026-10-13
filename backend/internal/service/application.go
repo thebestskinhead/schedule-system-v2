@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"schedule-system-v2/backend/internal/dao"
+	"schedule-system-v2/backend/internal/db"
 	"schedule-system-v2/backend/internal/model"
 )
 
@@ -93,10 +94,40 @@ func (s *ApplicationService) CreateApplication(ctx context.Context, userID int, 
 		return nil, err
 	}
 
-	// 生成申请编号
-	appNo, err := s.applicationDao.GenerateApplicationNo(ctx, appType)
-	if err != nil {
-		return nil, err
+	// 创建申请对象
+	now := time.Now()
+	application := &model.Application{
+		TypeCode:    appType,
+		ApplicantID: userID,
+		Status:      model.ApplicationStatusPending,
+		Data:        data,
+		Title:       reason, // 使用 reason 作为标题
+		Content:     reason,
+		CurrentLevel: 1,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	// 生成申请编号（撞唯一键时应用层重试 ≤3 次，见 G 项）
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		appNo, err := s.applicationDao.GenerateApplicationNo(ctx, appType)
+		if err != nil {
+			return nil, err
+		}
+		application.ApplicationNo = appNo
+		if err := s.applicationDao.Create(ctx, application); err != nil {
+			if db.IsDuplicateEntry(err) {
+				lastErr = err
+				continue // 唯一键冲突：重新生成编号后重试
+			}
+			return nil, err
+		}
+		lastErr = nil
+		break
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("生成申请编号失败（唯一键冲突）: %w", lastErr)
 	}
 
 	// 解析配置获取默认审批流程
@@ -115,21 +146,6 @@ func (s *ApplicationService) CreateApplication(ctx context.Context, userID int, 
 			Fields: []model.FieldConfig{},
 			Flow:   []model.FlowStep{{Level: 1, Role: "dept_admin", Label: "部门管理员审批"}},
 		}
-	}
-
-	// 创建申请
-	now := time.Now()
-	application := &model.Application{
-		ApplicationNo: appNo,
-		TypeCode:      appType,
-		ApplicantID:   userID,
-		Status:        model.ApplicationStatusPending,
-		Data:          data,
-		Title:         reason, // 使用 reason 作为标题
-		Content:       reason,
-		CurrentLevel:  1,
-		CreatedAt:     now,
-		UpdatedAt:     now,
 	}
 
 	// 计算总审批层级
@@ -232,7 +248,69 @@ func (s *ApplicationService) ProcessApproval(ctx context.Context, appID, approve
 		return fmt.Errorf("未知的申请类型: %s", app.TypeCode)
 	}
 
-	// 创建审批记录
+	// 仅评论：不改变状态，仅插入审批记录（SP 的 UPDATE 无变更会误触 SIGNAL，故单独处理）
+	if action == model.ApprovalActionComment {
+		approval := &model.ApplicationApproval{
+			ApplicationID: appID,
+			ApproverID:    approverID,
+			Action:        action,
+			Comment:       comment,
+			Level:         app.CurrentLevel,
+			CreatedAt:     time.Now(),
+		}
+		if err := s.applicationDao.CreateApproval(ctx, approval); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	// 计算期望状态（乐观锁）与目标状态
+	expectedStatus := int(app.Status)
+	var newStatus int
+	switch action {
+	case model.ApprovalActionApprove:
+		if app.CurrentLevel < app.TotalLevels {
+			newStatus = int(model.ApplicationStatusProcessing)
+		} else {
+			newStatus = int(model.ApplicationStatusApproved)
+		}
+	case model.ApprovalActionReject:
+		newStatus = int(model.ApplicationStatusRejected)
+	default:
+		return fmt.Errorf("不支持的审批操作")
+	}
+
+	// 原子推进：写审批记录 + 更新状态（乐观锁），替代原「创建审批记录 + 更新状态」两段
+	spErr := db.WithRetry(ctx, func() error {
+		_, e := db.GetDB().Exec("CALL sp_advance_application(?, ?, ?, ?, ?, ?)",
+			appID, approverID, int(action), comment, expectedStatus, newStatus)
+		return e
+	})
+	if spErr != nil {
+		if biz, ok := db.BusinessErrorFromSQLError(spErr); ok {
+			return biz
+		}
+		return spErr
+	}
+
+	// 多级审批：状态进入 Processing 时推进 current_level 以路由下一级
+	// （注：sp_advance_application 不维护 current_level，此处为 SP 之外的必要补充更新）
+	if action == model.ApprovalActionApprove && app.CurrentLevel < app.TotalLevels {
+		app.CurrentLevel++
+		app.Status = model.ApplicationStatusProcessing
+		app.UpdatedAt = time.Now()
+		if _, e := db.GetDB().Exec("UPDATE applications SET current_level = ?, updated_at = ? WHERE id = ?",
+			app.CurrentLevel, app.UpdatedAt, appID); e != nil {
+			fmt.Printf("advance current_level error: %v\n", e)
+		}
+		nextApprovers, err := executor.GetRequiredApprovers(ctx, app)
+		if err == nil {
+			go s.notifyApprovers(nextApprovers, app)
+		}
+		return nil
+	}
+
+	// 最终批准/拒绝：SP 提交成功后执行 executor 回调（失败告警不阻断）
 	approval := &model.ApplicationApproval{
 		ApplicationID: appID,
 		ApproverID:    approverID,
@@ -241,64 +319,14 @@ func (s *ApplicationService) ProcessApproval(ctx context.Context, appID, approve
 		Level:         app.CurrentLevel,
 		CreatedAt:     time.Now(),
 	}
-
-	if err := s.applicationDao.CreateApproval(ctx, approval); err != nil {
-		return err
-	}
-
-	// 处理审批结果
-	now := time.Now()
-	switch action {
-	case model.ApprovalActionApprove:
-		// 是否还有下一级审批
-		if app.CurrentLevel < app.TotalLevels {
-			// 进入下一级，使用乐观锁更新
-			app.CurrentLevel++
-			app.Status = model.ApplicationStatusProcessing
-			app.UpdatedAt = now
-			if err := s.applicationDao.Update(ctx, app); err != nil {
-				return err
-			}
-
-			// 通知下一级审批人
-			nextApprovers, err := executor.GetRequiredApprovers(ctx, app)
-			if err != nil {
-				return err
-			}
-			go s.notifyApprovers(nextApprovers, app)
-		} else {
-			// 最终批准，使用乐观锁检查
-			success, err := s.applicationDao.UpdateStatusWithCheck(ctx, appID, app.Status, model.ApplicationStatusApproved)
-			if err != nil {
-				return err
-			}
-			if !success {
-				return fmt.Errorf("申请状态已变更，请刷新后重试")
-			}
-
-			// 执行批准回调
-			if err := executor.OnApproved(ctx, app, approval); err != nil {
-				fmt.Printf("OnApproved callback error: %v\n", err)
-			}
+	if action == model.ApprovalActionApprove {
+		if err := executor.OnApproved(ctx, app, approval); err != nil {
+			fmt.Printf("OnApproved callback error: %v\n", err)
 		}
-
-	case model.ApprovalActionReject:
-		// 拒绝，使用乐观锁更新
-		success, err := s.applicationDao.UpdateStatusWithCheck(ctx, appID, app.Status, model.ApplicationStatusRejected)
-		if err != nil {
-			return err
-		}
-		if !success {
-			return fmt.Errorf("申请状态已变更，请刷新后重试")
-		}
-
-		// 执行拒绝回调
+	} else if action == model.ApprovalActionReject {
 		if err := executor.OnRejected(ctx, app, approval); err != nil {
 			fmt.Printf("OnRejected callback error: %v\n", err)
 		}
-
-	case model.ApprovalActionComment:
-		// 仅评论，不改变状态
 	}
 
 	return nil

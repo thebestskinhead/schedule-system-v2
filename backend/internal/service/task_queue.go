@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sync"
 	"time"
 
+	"schedule-system-v2/backend/internal/db"
 	"schedule-system-v2/backend/internal/model"
 )
 
@@ -344,11 +346,16 @@ func (q *TaskQueue) doExcelImport(task *ImportTask) (*ImportResult, error) {
 	}
 
 	if len(availabilities) > 0 {
-		service := NewAvailabilityService()
-		if err := service.DeleteByUserID(task.UserID); err != nil {
-			return nil, fmt.Errorf("删除旧记录失败: %w", err)
+		// 全量替换该用户无课表：走 sp_replace_availability（DELETE 全部 + INSERT IGNORE）
+		itemsJSON, err := json.Marshal(availabilities)
+		if err != nil {
+			return nil, fmt.Errorf("序列化无课数据失败: %w", err)
 		}
-		if err := service.CreateBatch(task.UserID, availabilities); err != nil {
+		err = db.WithRetry(context.Background(), func() error {
+			_, e := db.GetDB().Exec("CALL sp_replace_availability(?, ?)", task.UserID, string(itemsJSON))
+			return e
+		})
+		if err != nil {
 			return nil, fmt.Errorf("保存无课时间失败: %w", err)
 		}
 	}
@@ -359,26 +366,59 @@ func (q *TaskQueue) doExcelImport(task *ImportTask) (*ImportResult, error) {
 }
 
 // executeManualImport 执行手动录入
+// D 项：手动录入=增量修改该用户该时段（week/weekday/period），不走 sp_replace_availability；
+// 采用事务内「DELETE 该用户该时段现有行 + INSERT IGNORE 新值」，杜绝半截数据。
 func (q *TaskQueue) executeManualImport(task *ImportTask) (*ImportResult, error) {
 	if len(task.Availabilities) == 0 {
 		return &ImportResult{Imported: 0}, nil
 	}
 
-	service := NewAvailabilityService()
+	userID := task.UserID
 
-	// 删除该时段的所有记录
+	// 聚合需改动的时段 (week, weekday, period)
+	type slotKey struct{ week, weekday, period int }
+	slots := make(map[slotKey]struct{})
 	for _, av := range task.Availabilities {
-		service.availabilityDAO.DeleteByUserIDAndTime(task.UserID, av.Week, av.Weekday, av.Period)
+		slots[slotKey{av.Week, av.Weekday, av.Period}] = struct{}{}
 	}
 
-	// 批量插入新记录
-	if err := service.CreateBatch(task.UserID, task.Availabilities); err != nil {
-		return nil, fmt.Errorf("保存无课时间失败: %w", err)
+	// I-1 备份要求：删除前记录受影响行快照至应用日志（可恢复）
+	if existing, err := NewAvailabilityService().GetMyAvailability(userID); err == nil {
+		var backup []model.Availability
+		for _, e := range existing {
+			if _, ok := slots[slotKey{e.Week, e.Weekday, e.Period}]; ok {
+				backup = append(backup, e)
+			}
+		}
+		if len(backup) > 0 {
+			fmt.Printf("[I-1 backup] 手动录入将删除用户 %d 的无课记录 %d 行: %+v\n", userID, len(backup), backup)
+		}
 	}
 
-	return &ImportResult{
-		Imported: len(task.Availabilities),
-	}, nil
+	// 事务内：删除该用户该时段现有行 + INSERT IGNORE 新值
+	tx, err := db.GetDB().Beginx()
+	if err != nil {
+		return nil, fmt.Errorf("开启事务失败: %w", err)
+	}
+	defer tx.Rollback()
+
+	for sk := range slots {
+		if _, err := tx.Exec("DELETE FROM availability WHERE user_id=? AND week=? AND weekday=? AND period=?",
+			userID, sk.week, sk.weekday, sk.period); err != nil {
+			return nil, fmt.Errorf("删除旧无课记录失败: %w", err)
+		}
+	}
+	for _, av := range task.Availabilities {
+		if _, err := tx.Exec("INSERT IGNORE INTO availability (user_id, week, weekday, period) VALUES (?, ?, ?, ?)",
+			av.UserID, av.Week, av.Weekday, av.Period); err != nil {
+			return nil, fmt.Errorf("保存无课记录失败: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("提交事务失败: %w", err)
+	}
+
+	return &ImportResult{Imported: len(task.Availabilities)}, nil
 }
 
 // Stop 停止队列

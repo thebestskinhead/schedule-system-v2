@@ -1,9 +1,12 @@
 package service
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"math/rand"
 	"schedule-system-v2/backend/internal/dao"
+	"schedule-system-v2/backend/internal/db"
 	"schedule-system-v2/backend/internal/model"
 	"sort"
 	"time"
@@ -426,23 +429,20 @@ func (s *ScheduleService) ConfirmSchedule(adminID int, req *model.ConfirmSchedul
 		return errors.New("无排班数据")
 	}
 
-	s.dutyDAO.DeleteByWeek(req.Week)
-
-	var records []model.DutyRecord
-	for _, cell := range req.Cells {
-		for _, userID := range cell.UserIDs {
-			records = append(records, model.DutyRecord{
-				Week:       req.Week,
-				Weekday:    cell.Weekday,
-				Period:     cell.Period,
-				UserID:     userID,
-				AssignedBy: adminID,
-				Status:     "pending",
-			})
-		}
+	// 序列化与 sp_confirm_schedule 的 JSON_TABLE 解析字段一致：weekday/period/user_ids
+	cellsJSON, err := json.Marshal(req.Cells)
+	if err != nil {
+		return err
 	}
 
-	if err := s.dutyDAO.CreateBatch(records); err != nil {
+	err = db.WithRetry(context.Background(), func() error {
+		_, e := db.GetDB().Exec("CALL sp_confirm_schedule(?, ?, ?)", req.Week, adminID, string(cellsJSON))
+		return e
+	})
+	if err != nil {
+		if biz, ok := db.BusinessErrorFromSQLError(err); ok {
+			return biz
+		}
 		return err
 	}
 
@@ -521,26 +521,25 @@ func (s *ScheduleService) SaveScheduleSettings(adminID int, settings *model.Sche
 
 // UpdateSchedule 更新排班（添加/删除人员）
 func (s *ScheduleService) UpdateSchedule(adminID int, req *model.UpdateScheduleRequest) error {
-	// 删除人员
-	for _, userID := range req.RemoveUserIDs {
-		if err := s.dutyDAO.DeleteByWeekdayPeriodAndUser(req.Week, req.Weekday, req.Period, userID); err != nil {
-			return err
-		}
+	addJSON, err := json.Marshal(req.AddUserIDs)
+	if err != nil {
+		return err
+	}
+	removeJSON, err := json.Marshal(req.RemoveUserIDs)
+	if err != nil {
+		return err
 	}
 
-	// 添加人员
-	for _, userID := range req.AddUserIDs {
-		record := model.DutyRecord{
-			Week:       req.Week,
-			Weekday:    req.Weekday,
-			Period:     req.Period,
-			UserID:     userID,
-			AssignedBy: adminID,
-			Status:     "pending",
+	err = db.WithRetry(context.Background(), func() error {
+		_, e := db.GetDB().Exec("CALL sp_update_schedule_cell(?, ?, ?, ?, ?, ?)",
+			req.Week, req.Weekday, req.Period, adminID, string(addJSON), string(removeJSON))
+		return e
+	})
+	if err != nil {
+		if biz, ok := db.BusinessErrorFromSQLError(err); ok {
+			return biz
 		}
-		if err := s.dutyDAO.Create(&record); err != nil {
-			return err
-		}
+		return err
 	}
 
 	return nil

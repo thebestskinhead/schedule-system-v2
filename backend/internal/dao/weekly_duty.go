@@ -25,23 +25,17 @@ func (d *WeeklyDutyDAO) Create(assignment *model.WeeklyDutyAssignment) error {
 	return nil
 }
 
-// CreateBatch 批量创建分工记录
+// CreateBatch 批量创建分工记录（单条直连连接池，事务已由 sp_publish_weekly_assignments 承担）
 func (d *WeeklyDutyDAO) CreateBatch(assignments []*model.WeeklyDutyAssignment) error {
 	if len(assignments) == 0 {
 		return nil
 	}
 
-	tx, err := db.GetDB().Beginx()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
 	query := `INSERT INTO weekly_duty_assignments (week, department, weekday, is_assigned, created_by) 
 			  VALUES (?, ?, ?, ?, ?)`
 
 	for _, assignment := range assignments {
-		result, err := tx.Exec(query, assignment.Week, assignment.Department, assignment.Weekday, assignment.IsAssigned, assignment.CreatedBy)
+		result, err := db.GetDB().Exec(query, assignment.Week, assignment.Department, assignment.Weekday, assignment.IsAssigned, assignment.CreatedBy)
 		if err != nil {
 			return err
 		}
@@ -49,7 +43,7 @@ func (d *WeeklyDutyDAO) CreateBatch(assignments []*model.WeeklyDutyAssignment) e
 		assignment.ID = int(id)
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 // GetByID 根据ID获取分工记录
