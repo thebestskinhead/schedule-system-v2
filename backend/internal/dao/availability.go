@@ -12,7 +12,7 @@ func NewAvailabilityDAO() *AvailabilityDAO {
 }
 
 func (d *AvailabilityDAO) Create(availability *model.Availability) error {
-	query := `INSERT INTO availability (user_id, week, weekday, period) VALUES (?, ?, ?, ?)`
+	query := `INSERT IGNORE INTO availability (user_id, week, weekday, period) VALUES (?, ?, ?, ?)`
 	result, err := db.GetDB().Exec(query, availability.UserID, availability.Week, availability.Weekday, availability.Period)
 	if err != nil {
 		return err
@@ -26,7 +26,7 @@ func (d *AvailabilityDAO) CreateBatch(availabilities []model.Availability) error
 	if len(availabilities) == 0 {
 		return nil
 	}
-	query := `INSERT INTO availability (user_id, week, weekday, period) VALUES (:user_id, :week, :weekday, :period)`
+	query := `INSERT IGNORE INTO availability (user_id, week, weekday, period) VALUES (:user_id, :week, :weekday, :period)`
 	_, err := db.GetDB().NamedExec(query, availabilities)
 	return err
 }
@@ -50,7 +50,7 @@ func (d *AvailabilityDAO) GetByTime(week, weekday, period int) ([]model.Availabi
 	query := `SELECT a.*, u.student_id, u.name as user_name 
 		FROM availability a 
 		JOIN users u ON a.user_id = u.id 
-		WHERE a.week = ? AND a.weekday = ? AND a.period = ? AND u.is_active = 1`
+		WHERE a.week = ? AND a.weekday = ? AND a.period = ? AND u.employment_status = 'active'`
 	err := db.GetDB().Select(&list, query, week, weekday, period)
 	return list, err
 }
@@ -60,7 +60,7 @@ func (d *AvailabilityDAO) GetAvailableUsers(week, weekday, period int) ([]model.
 	query := `SELECT u.id, u.student_id, u.name 
 		FROM users u 
 		JOIN availability a ON u.id = a.user_id 
-		WHERE a.week = ? AND a.weekday = ? AND a.period = ? AND u.is_active = 1
+		WHERE a.week = ? AND a.weekday = ? AND a.period = ? AND u.employment_status = 'active'
 		AND u.dept_role != 'dept_admin'`
 	err := db.GetDB().Select(&users, query, week, weekday, period)
 	return users, err
@@ -73,7 +73,7 @@ func (d *AvailabilityDAO) GetAvailableUsersForSchedule(week, weekday, period int
 		FROM users u 
 		JOIN availability a ON u.id = a.user_id 
 		WHERE a.week = ? AND a.weekday = ? AND a.period = ? 
-		AND u.is_active = 1 
+		AND u.employment_status = 'active' 
 		AND u.department = ?
 		AND u.dept_role != 'dept_admin'`
 	err := db.GetDB().Select(&users, query, week, weekday, period, department)
@@ -85,7 +85,7 @@ func (d *AvailabilityDAO) GetAllGrouped() ([]model.AvailabilityWithUser, error) 
 	query := `SELECT a.*, u.student_id, u.name as user_name 
 		FROM availability a 
 		JOIN users u ON a.user_id = u.id 
-		WHERE u.is_active = 1
+		WHERE u.employment_status = 'active'
 		ORDER BY a.week, a.weekday, a.period, u.id`
 	err := db.GetDB().Select(&list, query)
 	return list, err
@@ -122,7 +122,7 @@ func (d *AvailabilityDAO) GetAvailabilityMatrix(week int, department string) ([]
 	query := `SELECT a.user_id, a.weekday, a.period 
 		FROM availability a 
 		JOIN users u ON a.user_id = u.id 
-		WHERE a.week = ? AND u.department = ? AND u.is_active = 1 AND u.dept_role != 'dept_admin'`
+		WHERE a.week = ? AND u.department = ? AND u.employment_status = 'active' AND u.dept_role != 'dept_admin'`
 	err := db.GetDB().Select(&items, query, week, department)
 	return items, err
 }

@@ -32,8 +32,8 @@ func (s *TempPermissionService) GrantPermission(adminID int, checker *auth.Check
 		return errors.New("用户不存在")
 	}
 
-	// 验证过期时间
-	if req.ExpiresAt.Before(time.Now()) {
+	// 验证过期时间（NULL = 永久，跳过校验）
+	if req.ExpiresAt != nil && req.ExpiresAt.Before(time.Now()) {
 		return errors.New("过期时间必须在将来")
 	}
 
@@ -192,10 +192,15 @@ func (s *TempPermissionService) GetMyPermissions(userID int) ([]model.MyPermissi
 	now := time.Now()
 
 	for _, perm := range perms {
-		expiresAt := time.Time(perm.ExpiresAt)
-		daysLeft := int(expiresAt.Sub(now).Hours() / 24)
-		if daysLeft < 0 {
+		var daysLeft int
+		if perm.ExpiresAt == nil {
+			// NULL = 永久有效：约定 days_left 取 0（见交付报告）
 			daysLeft = 0
+		} else {
+			daysLeft = int(perm.ExpiresAt.Sub(now).Hours() / 24)
+			if daysLeft < 0 {
+				daysLeft = 0
+			}
 		}
 
 		// 获取资源名称
@@ -264,7 +269,7 @@ func (s *TempPermissionService) convertToView(perms []model.UserPermissionTemp) 
 			CreatedAt:      perm.CreatedAt,
 			ExpiresAt:      perm.ExpiresAt,
 			IsActive:       perm.IsActive,
-			IsExpired:      perm.ExpiresAt.Before(now),
+			IsExpired:      perm.ExpiresAt != nil && perm.ExpiresAt.Before(now),
 		})
 	}
 

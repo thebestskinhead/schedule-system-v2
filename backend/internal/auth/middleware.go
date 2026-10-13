@@ -159,6 +159,14 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
+		// 三态账号状态断言：仅 employment_status='active' 可继续。
+		// 确保离职/降权即时生效——即使 JWT 仍有效，状态变更后下次请求即被拦截。
+		if user.EmploymentStatus != model.EmploymentStatusActive {
+			c.JSON(http.StatusUnauthorized, model.Response{Code: 401, Message: "用户不存在或已被禁用"})
+			c.Abort()
+			return
+		}
+
 		c.Set("userID", user.ID)
 		c.Set("studentID", user.StudentID)
 		c.Set("role", user.Role)

@@ -227,13 +227,30 @@ func (s *QRLoginService) Poll(sessionID string) *model.QRPollResponse {
 		// 查系统数据库
 		user, err := s.userDAO.GetByStudentID(userInfo.StudentID)
 		if err == nil && user != nil {
-			// 显式校验账号状态：被禁用账号不能通过扫码登录
-			if !user.IsActive {
-				session.SetResult(model.QRStatusError, "账号已被禁用，请联系管理员")
+			// 三态账号状态校验：仅 employment_status='active' 可扫码登录
+			switch user.EmploymentStatus {
+			case model.EmploymentStatusPending:
+				session.SetResult(model.QRStatusError, "账号待激活，请查收激活邮件完成激活后再登录")
 				session.ExpiresAt = time.Now().Add(30 * time.Second)
 				return &model.QRPollResponse{
 					Status:  model.QRStatusError,
-					Message: "账号已被禁用，请联系管理员",
+					Message: "账号待激活，请查收激活邮件完成激活后再登录",
+				}
+			case model.EmploymentStatusResigned:
+				session.SetResult(model.QRStatusError, "该账号已离职，无法登录")
+				session.ExpiresAt = time.Now().Add(30 * time.Second)
+				return &model.QRPollResponse{
+					Status:  model.QRStatusError,
+					Message: "该账号已离职，无法登录",
+				}
+			case model.EmploymentStatusActive:
+				// 在职，继续生成 JWT
+			default:
+				session.SetResult(model.QRStatusError, "账号状态异常，请联系管理员")
+				session.ExpiresAt = time.Now().Add(30 * time.Second)
+				return &model.QRPollResponse{
+					Status:  model.QRStatusError,
+					Message: "账号状态异常，请联系管理员",
 				}
 			}
 			// 已注册，生成 JWT

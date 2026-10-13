@@ -51,7 +51,7 @@ func (s *UserService) Register(req *model.RegisterRequest) (*model.User, error) 
 		Role:       role,
 		Department: req.Department,
 		DeptRole:   deptRole,
-		IsActive:   true,
+		EmploymentStatus: model.EmploymentStatusActive,
 	}
 
 	if err := s.userDAO.Create(user); err != nil {
@@ -71,10 +71,18 @@ func (s *UserService) Login(req *model.LoginRequest) (*model.LoginResponse, erro
 		return nil, errors.New("用户不存在")
 	}
 
-	// 显式校验账号状态：DAO 层已过滤 is_active=1，此处防御性复查，
-	// 确保即使查询条件变更，被禁用账号也无法登录
-	if !user.IsActive {
-		return nil, errors.New("账号已被禁用，请联系管理员")
+	// 三态账号状态校验：仅 employment_status='active' 可登录。
+	// DAO 层已按 employment_status='active' 过滤，此处防御性复查；
+	// pending（待激活）与 resigned（已离职）均明确拦截，消息供前端判别。
+	switch user.EmploymentStatus {
+	case model.EmploymentStatusPending:
+		return nil, errors.New("账号待激活，请查收激活邮件完成激活后再登录")
+	case model.EmploymentStatusResigned:
+		return nil, errors.New("该账号已离职，无法登录")
+	case model.EmploymentStatusActive:
+		// 在职，放行
+	default:
+		return nil, errors.New("账号状态异常，请联系管理员")
 	}
 
 	if !utils.CheckPassword(req.Password, user.Password) {
@@ -105,7 +113,7 @@ func (s *UserService) GetUserByID(id int) (*model.User, error) {
 }
 
 func (s *UserService) GetUserList() ([]model.User, error) {
-	return s.userDAO.List()
+	return s.userDAO.List("")
 }
 
 func (s *UserService) UpdateUser(userID int, req *model.UpdateUserRequest) error {
@@ -128,23 +136,23 @@ func (s *UserService) SetUserRole(targetUserID int, role string) error {
 	return s.userDAO.SetRole(targetUserID, role)
 }
 
-func (s *UserService) DeleteUser(id int) error {
-	return s.userDAO.Delete(id)
+func (s *UserService) DeleteUser(id, adminID int) error {
+	return s.userDAO.Delete(id, adminID)
 }
 
 // GetUserListByDepartment 按部门获取用户列表
 func (s *UserService) GetUserListByDepartment(dept string) ([]model.User, error) {
-	return s.userDAO.ListByDepartment(dept)
+	return s.userDAO.ListByDepartment(dept, "")
 }
 
 // GetUsersByDepts 按多个部门获取用户
 func (s *UserService) GetUsersByDepts(depts []string) ([]model.User, error) {
-	return s.userDAO.ListByDepartments(depts)
+	return s.userDAO.ListByDepartments(depts, "")
 }
 
 // GetUsersByFilter 根据筛选条件获取用户
 func (s *UserService) GetUsersByFilter(filter model.UserListFilter) ([]model.User, error) {
-	return s.userDAO.ListByFilter(filter)
+	return s.userDAO.ListByFilter(filter, "")
 }
 
 // SetUserDepartment 设置用户部门（权限由 handler 层校验）
@@ -176,7 +184,7 @@ func (s *UserService) SetUserDeptRole(targetUserID int, deptRole string) error {
 
 // GetUsersByDeptRole 获取指定部门角色的用户
 func (s *UserService) GetUsersByDeptRole(deptRole string) ([]model.User, error) {
-	return s.userDAO.GetByDeptRole(deptRole)
+	return s.userDAO.GetByDeptRole(deptRole, "")
 }
 
 // AdminCreateUser 管理员创建用户（权限由 handler 层校验）
@@ -211,7 +219,7 @@ func (s *UserService) AdminCreateUser(req *model.AdminCreateUserRequest) (*model
 		Role:       req.Role,
 		Department: req.Department,
 		DeptRole:   req.DeptRole,
-		IsActive:   true,
+		EmploymentStatus: model.EmploymentStatusActive,
 	}
 
 	if err := s.userDAO.Create(user); err != nil {
@@ -265,7 +273,7 @@ func (s *UserService) AdminDeleteUser(operatorID, targetUserID int) error {
 		return errors.New("不能删除自己")
 	}
 
-	return s.userDAO.Delete(targetUserID)
+	return s.userDAO.Delete(targetUserID, operatorID)
 }
 
 // ChangePassword 修改用户密码

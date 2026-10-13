@@ -4,18 +4,26 @@ import "time"
 
 // User 用户模型
 type User struct {
-	ID         int       `json:"id" db:"id"`
-	StudentID  string    `json:"student_id" db:"student_id"`
-	Name       string    `json:"name" db:"name"`
-	Email      string    `json:"email" db:"email"`
-	Password   string    `json:"-" db:"password"`
-	Role       string    `json:"role" db:"role"`
-	Department string    `json:"department" db:"department"`
-	DeptRole   string    `json:"dept_role" db:"dept_role"`
-	IsActive   bool      `json:"is_active" db:"is_active"`
-	CreatedAt  time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at" db:"updated_at"`
+	ID               int       `json:"id" db:"id"`
+	StudentID        string    `json:"student_id" db:"student_id"`
+	Name             string    `json:"name" db:"name"`
+	Email            string    `json:"email" db:"email"`
+	Password         string    `json:"-" db:"password"`
+	Role             string    `json:"role" db:"role"`
+	Department       string    `json:"department" db:"department"`
+	DeptRole         string    `json:"dept_role" db:"dept_role"`
+	EmploymentStatus string    `json:"employment_status" db:"employment_status"`
+	DutyCount        int       `json:"duty_count" db:"duty_count"`
+	CreatedAt        time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at" db:"updated_at"`
 }
+
+// 任职状态常量（users.employment_status 三态）
+const (
+	EmploymentStatusPending  = "pending"  // 待入职（已录入未激活，不可登录）
+	EmploymentStatusActive   = "active"   // 在职
+	EmploymentStatusResigned = "resigned" // 离职（不可登录，不可再次注册）
+)
 
 // UserRole 角色常量（单一角色体系）
 // users.role 字段仅允许 admin/user：admin 为系统管理员（唯一特殊身份，系统引导创建），user 为普通用户。
@@ -77,13 +85,14 @@ type LoginResponse struct {
 
 // UserInfo 用户信息（不含密码）
 type UserInfo struct {
-	ID         int    `json:"id"`
-	StudentID  string `json:"student_id"`
-	Name       string `json:"name"`
-	Email      string `json:"email"`
-	Role       string `json:"role"`
-	Department string `json:"department"`
-	DeptRole   string `json:"dept_role"`
+	ID               int    `json:"id"`
+	StudentID        string `json:"student_id"`
+	Name             string `json:"name"`
+	Email            string `json:"email"`
+	Role             string `json:"role"`
+	Department       string `json:"department"`
+	DeptRole         string `json:"dept_role"`
+	EmploymentStatus string `json:"employment_status"`
 }
 
 // UpdateUserRequest 更新用户信息请求
@@ -97,8 +106,6 @@ type SetRoleRequest struct {
 	UserID int    `json:"user_id" binding:"required"`
 	Role   string `json:"role" binding:"required"`
 }
-
-
 
 // SystemStatus 系统状态
 type SystemStatus struct {

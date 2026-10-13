@@ -32,8 +32,9 @@ func (h *TempPermissionHandler) GrantPermission(c *gin.Context) {
 	}
 
 	// 确保过期时间是UTC
-	if req.ExpiresAt.Location().String() != "UTC" {
-		req.ExpiresAt = req.ExpiresAt.UTC()
+	if req.ExpiresAt != nil && req.ExpiresAt.Location().String() != "UTC" {
+		t := req.ExpiresAt.UTC()
+		req.ExpiresAt = &t
 	}
 
 	adminID := auth.GetUserIDFromContext(c)

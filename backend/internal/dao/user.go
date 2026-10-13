@@ -24,9 +24,10 @@ func (d *UserDAO) Create(user *model.User) error {
 	return nil
 }
 
+// GetByID 单点查询：不过滤 employment_status（返回真实行，便于 service 层区分 不存在/待激活/已离职）
 func (d *UserDAO) GetByID(id int) (*model.User, error) {
 	var user model.User
-	query := `SELECT * FROM users WHERE id = ? AND is_active = 1`
+	query := `SELECT * FROM users WHERE id = ?`
 	err := db.GetDB().Get(&user, query, id)
 	if err != nil {
 		return nil, err
@@ -34,9 +35,10 @@ func (d *UserDAO) GetByID(id int) (*model.User, error) {
 	return &user, nil
 }
 
+// GetByStudentID 单点查询：不过滤 employment_status
 func (d *UserDAO) GetByStudentID(studentID string) (*model.User, error) {
 	var user model.User
-	query := `SELECT * FROM users WHERE student_id = ? AND is_active = 1`
+	query := `SELECT * FROM users WHERE student_id = ?`
 	err := db.GetDB().Get(&user, query, studentID)
 	if err != nil {
 		return nil, err
@@ -44,9 +46,10 @@ func (d *UserDAO) GetByStudentID(studentID string) (*model.User, error) {
 	return &user, nil
 }
 
+// GetByEmail 单点查询：不过滤 employment_status
 func (d *UserDAO) GetByEmail(email string) (*model.User, error) {
 	var user model.User
-	query := `SELECT * FROM users WHERE email = ? AND is_active = 1`
+	query := `SELECT * FROM users WHERE email = ?`
 	err := db.GetDB().Get(&user, query, email)
 	if err != nil {
 		return nil, err
@@ -65,10 +68,17 @@ func (d *UserDAO) IsEmpty() (bool, error) {
 	return count == 0, nil
 }
 
-func (d *UserDAO) List() ([]model.User, error) {
+// List 列表查询：默认返回全部状态；employmentStatus 非空时按状态筛选（空串 = 不过滤）
+func (d *UserDAO) List(employmentStatus string) ([]model.User, error) {
 	var users []model.User
-	query := `SELECT id, student_id, name, email, role, department, dept_role, is_active, created_at FROM users WHERE is_active = 1 ORDER BY id DESC`
-	err := db.GetDB().Select(&users, query)
+	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, duty_count, created_at FROM users`
+	args := []interface{}{}
+	if employmentStatus != "" {
+		query += ` WHERE employment_status = ?`
+		args = append(args, employmentStatus)
+	}
+	query += ` ORDER BY id DESC`
+	err := db.GetDB().Select(&users, query, args...)
 	return users, err
 }
 
@@ -89,27 +99,24 @@ func (d *UserDAO) UpdatePassword(id int, password string) error {
 	return err
 }
 
-// Delete 将用户标记为禁用（is_active = 0），而非物理删除
-//
-// 设计说明：
-// 1. 历史数据完整性：用户关联的值班记录(duty_records)、审批记录(application_approvers)等
-//    需要保留操作者信息，物理删除会导致历史记录变成"匿名操作"
-// 2. 审计需求：排班系统需要追溯谁排的班、谁值的班、谁审批的申请
-// 3. 外键约束：duty_records.assigned_by、applications.applicant_id 等字段依赖 users 表
-// 4. 学号唯一性：student_id 有唯一约束，物理删除后该学号无法重新注册（若人员重新加入）
-//
-// 注意：这实际上是"禁用用户"而非真正的删除，已禁用用户的数据仍保留在数据库中
-// 如需彻底清理数据，需要额外实现归档逻辑
-func (d *UserDAO) Delete(id int) error {
-	query := `UPDATE users SET is_active = 0 WHERE id = ?`
-	_, err := db.GetDB().Exec(query, id)
+// Delete 将用户标记为离职（调用存储过程 sp_mark_user_resigned），而非物理删除/禁用。
+// 存储过程签名：(p_user_id, p_admin_id)。
+func (d *UserDAO) Delete(id int, adminID int) error {
+	query := `CALL sp_mark_user_resigned(?, ?)`
+	_, err := db.GetDB().Exec(query, id, adminID)
 	return err
 }
 
-func (d *UserDAO) Count() (int64, error) {
+// Count 计数：默认全状态；employmentStatus 非空时按状态筛选
+func (d *UserDAO) Count(employmentStatus string) (int64, error) {
 	var count int64
-	query := `SELECT COUNT(*) FROM users WHERE is_active = 1`
-	err := db.GetDB().Get(&count, query)
+	query := `SELECT COUNT(*) FROM users`
+	args := []interface{}{}
+	if employmentStatus != "" {
+		query += ` WHERE employment_status = ?`
+		args = append(args, employmentStatus)
+	}
+	err := db.GetDB().Get(&count, query, args...)
 	return count, err
 }
 
@@ -133,12 +140,18 @@ func (d *UserDAO) SetDepartment(userID int, dept string) error {
 	return err
 }
 
-// GetUsersByIDs 按ID批量获取用户
-func (d *UserDAO) GetUsersByIDs(userIDs []int) ([]model.User, error) {
+// GetUsersByIDs 按ID批量获取用户：默认全状态；employmentStatus 非空时按状态筛选
+func (d *UserDAO) GetUsersByIDs(userIDs []int, employmentStatus string) ([]model.User, error) {
 	if len(userIDs) == 0 {
 		return []model.User{}, nil
 	}
-	query, args, err := sqlx.In(`SELECT id, student_id, name, email, role, department, dept_role, is_active, created_at FROM users WHERE id IN (?) AND is_active = 1`, userIDs)
+	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, duty_count, created_at FROM users WHERE id IN (?)`
+	args := []interface{}{userIDs}
+	if employmentStatus != "" {
+		query += ` AND employment_status = ?`
+		args = append(args, employmentStatus)
+	}
+	query, args, err := sqlx.In(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -150,25 +163,37 @@ func (d *UserDAO) GetUsersByIDs(userIDs []int) ([]model.User, error) {
 	return users, nil
 }
 
-// ListByDepartment 按部门获取用户列表
-func (d *UserDAO) ListByDepartment(dept string) ([]model.User, error) {
+// ListByDepartment 按部门获取用户列表：默认全状态；employmentStatus 非空时按状态筛选
+func (d *UserDAO) ListByDepartment(dept, employmentStatus string) ([]model.User, error) {
 	var users []model.User
-	query := `SELECT id, student_id, name, email, role, department, dept_role, is_active, created_at 
-			  FROM users WHERE is_active = 1 AND department = ? ORDER BY id DESC`
-	err := db.GetDB().Select(&users, query, dept)
+	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, duty_count, created_at 
+			  FROM users WHERE department = ?`
+	args := []interface{}{dept}
+	if employmentStatus != "" {
+		query += ` AND employment_status = ?`
+		args = append(args, employmentStatus)
+	}
+	query += ` ORDER BY id DESC`
+	err := db.GetDB().Select(&users, query, args...)
 	return users, err
 }
 
-// ListByDepartments 按多个部门获取用户列表
-func (d *UserDAO) ListByDepartments(depts []string) ([]model.User, error) {
+// ListByDepartments 按多个部门获取用户列表：默认全状态；employmentStatus 非空时按状态筛选
+func (d *UserDAO) ListByDepartments(depts []string, employmentStatus string) ([]model.User, error) {
 	if len(depts) == 0 {
-		return d.List()
+		return d.List(employmentStatus)
 	}
 
 	// 使用 sqlx.In 处理 IN 查询
-	query := `SELECT id, student_id, name, email, role, department, dept_role, is_active, created_at 
-			  FROM users WHERE is_active = 1 AND department IN (?) ORDER BY id DESC`
-	query, args, err := sqlx.In(query, depts)
+	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, duty_count, created_at 
+			  FROM users WHERE department IN (?)`
+	args := []interface{}{depts}
+	if employmentStatus != "" {
+		query += ` AND employment_status = ?`
+		args = append(args, employmentStatus)
+	}
+	query += ` ORDER BY id DESC`
+	query, args, err := sqlx.In(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -178,10 +203,10 @@ func (d *UserDAO) ListByDepartments(depts []string) ([]model.User, error) {
 	return users, err
 }
 
-// ListByFilter 根据筛选条件获取用户列表
-func (d *UserDAO) ListByFilter(filter model.UserListFilter) ([]model.User, error) {
-	query := `SELECT id, student_id, name, email, role, department, dept_role, is_active, created_at 
-			  FROM users WHERE is_active = 1`
+// ListByFilter 根据筛选条件获取用户列表：默认全状态；employmentStatus 非空时按状态筛选
+func (d *UserDAO) ListByFilter(filter model.UserListFilter, employmentStatus string) ([]model.User, error) {
+	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, duty_count, created_at 
+			  FROM users WHERE 1=1`
 	var args []interface{}
 
 	if len(filter.Departments) > 0 {
@@ -197,6 +222,11 @@ func (d *UserDAO) ListByFilter(filter model.UserListFilter) ([]model.User, error
 	if filter.DeptRole != "" {
 		query += ` AND dept_role = ?`
 		args = append(args, filter.DeptRole)
+	}
+
+	if employmentStatus != "" {
+		query += ` AND employment_status = ?`
+		args = append(args, employmentStatus)
 	}
 
 	query += ` ORDER BY id DESC`
@@ -215,29 +245,47 @@ func (d *UserDAO) ListByFilter(filter model.UserListFilter) ([]model.User, error
 	return users, err
 }
 
-// GetByDeptRole 获取指定部门角色的用户
-func (d *UserDAO) GetByDeptRole(deptRole string) ([]model.User, error) {
+// GetByDeptRole 获取指定部门角色的用户：默认全状态；employmentStatus 非空时按状态筛选
+func (d *UserDAO) GetByDeptRole(deptRole, employmentStatus string) ([]model.User, error) {
 	var users []model.User
-	query := `SELECT id, student_id, name, email, role, department, dept_role, is_active, created_at 
-			  FROM users WHERE is_active = 1 AND dept_role = ? ORDER BY id DESC`
-	err := db.GetDB().Select(&users, query, deptRole)
+	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, duty_count, created_at 
+			  FROM users WHERE dept_role = ?`
+	args := []interface{}{deptRole}
+	if employmentStatus != "" {
+		query += ` AND employment_status = ?`
+		args = append(args, employmentStatus)
+	}
+	query += ` ORDER BY id DESC`
+	err := db.GetDB().Select(&users, query, args...)
 	return users, err
 }
 
-// GetByDepartmentAndRole 按部门和角色获取用户
-func (d *UserDAO) GetByDepartmentAndRole(department, deptRole string) ([]model.User, error) {
+// GetByDepartmentAndRole 按部门和角色获取用户：默认全状态；employmentStatus 非空时按状态筛选
+func (d *UserDAO) GetByDepartmentAndRole(department, deptRole, employmentStatus string) ([]model.User, error) {
 	var users []model.User
-	query := `SELECT id, student_id, name, email, role, department, dept_role, is_active, created_at 
-			  FROM users WHERE is_active = 1 AND department = ? AND dept_role = ? ORDER BY id DESC`
-	err := db.GetDB().Select(&users, query, department, deptRole)
+	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, duty_count, created_at 
+			  FROM users WHERE department = ? AND dept_role = ?`
+	args := []interface{}{department, deptRole}
+	if employmentStatus != "" {
+		query += ` AND employment_status = ?`
+		args = append(args, employmentStatus)
+	}
+	query += ` ORDER BY id DESC`
+	err := db.GetDB().Select(&users, query, args...)
 	return users, err
 }
 
-// GetByRole 按系统角色获取用户
-func (d *UserDAO) GetByRole(role string) ([]model.User, error) {
+// GetByRole 按系统角色获取用户：默认全状态；employmentStatus 非空时按状态筛选
+func (d *UserDAO) GetByRole(role, employmentStatus string) ([]model.User, error) {
 	var users []model.User
-	query := `SELECT id, student_id, name, email, role, department, dept_role, is_active, created_at 
-			  FROM users WHERE is_active = 1 AND role = ? ORDER BY id DESC`
-	err := db.GetDB().Select(&users, query, role)
+	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, duty_count, created_at 
+			  FROM users WHERE role = ?`
+	args := []interface{}{role}
+	if employmentStatus != "" {
+		query += ` AND employment_status = ?`
+		args = append(args, employmentStatus)
+	}
+	query += ` ORDER BY id DESC`
+	err := db.GetDB().Select(&users, query, args...)
 	return users, err
 }

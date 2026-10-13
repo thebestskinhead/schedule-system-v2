@@ -44,7 +44,7 @@ func (d *TempPermissionDAO) GetByID(id int) (*model.UserPermissionTemp, error) {
 func (d *TempPermissionDAO) GetActiveByUserID(userID int) ([]model.UserPermissionTemp, error) {
 	var perms []model.UserPermissionTemp
 	query := `SELECT * FROM user_permissions_temp 
-			  WHERE user_id = ? AND is_active = TRUE AND expires_at > NOW()
+			  WHERE user_id = ? AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())
 			  ORDER BY created_at DESC`
 	err := db.GetDB().Select(&perms, query, userID)
 	return perms, err
@@ -64,7 +64,7 @@ func (d *TempPermissionDAO) GetByUserID(ctx context.Context, userID int) ([]mode
 func (d *TempPermissionDAO) GetAllActive() ([]model.UserPermissionTemp, error) {
 	var perms []model.UserPermissionTemp
 	query := `SELECT * FROM user_permissions_temp 
-			  WHERE is_active = TRUE AND expires_at > NOW()
+			  WHERE is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())
 			  ORDER BY created_at DESC`
 	err := db.GetDB().Select(&perms, query)
 	return perms, err
@@ -94,7 +94,7 @@ func (d *TempPermissionDAO) Delete(id int) error {
 
 // CleanupExpired 清理已过期的权限（设置is_active为false）
 func (d *TempPermissionDAO) CleanupExpired() error {
-	query := `UPDATE user_permissions_temp SET is_active = FALSE WHERE expires_at <= NOW() AND is_active = TRUE`
+	query := `UPDATE user_permissions_temp SET is_active = FALSE WHERE expires_at IS NOT NULL AND expires_at <= NOW() AND is_active = TRUE`
 	_, err := db.GetDB().Exec(query)
 	return err
 }
@@ -103,7 +103,7 @@ func (d *TempPermissionDAO) CleanupExpired() error {
 func (d *TempPermissionDAO) HasPermission(userID int, perm model.Permission) (bool, error) {
 	var count int
 	query := `SELECT COUNT(*) FROM user_permissions_temp 
-			  WHERE user_id = ? AND permission = ? AND is_active = TRUE AND expires_at > NOW()`
+			  WHERE user_id = ? AND permission = ? AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())`
 	err := db.GetDB().Get(&count, query, userID, perm)
 	if err != nil {
 		return false, err
@@ -117,7 +117,7 @@ func (d *TempPermissionDAO) HasPermissionWithResource(userID int, perm model.Per
 	query := `SELECT COUNT(*) FROM user_permissions_temp 
 			  WHERE user_id = ? AND permission = ? 
 			  AND (resource_type = 'all' OR (resource_type = ? AND resource_id = ?))
-			  AND is_active = TRUE AND expires_at > NOW()`
+			  AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())`
 	err := db.GetDB().Get(&count, query, userID, perm, resourceType, resourceID)
 	if err != nil {
 		return false, err
@@ -128,7 +128,7 @@ func (d *TempPermissionDAO) HasPermissionWithResource(userID int, perm model.Per
 // GetExpiredPermissions 获取已过期的权限
 func (d *TempPermissionDAO) GetExpiredPermissions() ([]model.UserPermissionTemp, error) {
 	var perms []model.UserPermissionTemp
-	query := `SELECT * FROM user_permissions_temp WHERE expires_at <= NOW() AND is_active = TRUE`
+	query := `SELECT * FROM user_permissions_temp WHERE expires_at IS NOT NULL AND expires_at <= NOW() AND is_active = TRUE`
 	err := db.GetDB().Select(&perms, query)
 	return perms, err
 }
@@ -144,8 +144,8 @@ func (d *TempPermissionDAO) ExtendExpiration(id int, newExpiresAt time.Time) err
 func (d *TempPermissionDAO) GetUserPermissionStats(userID int) (activeCount, expiredCount int, err error) {
 	query := `
 		SELECT 
-			SUM(CASE WHEN is_active = TRUE AND expires_at > NOW() THEN 1 ELSE 0 END) as active,
-			SUM(CASE WHEN is_active = FALSE OR expires_at <= NOW() THEN 1 ELSE 0 END) as expired
+			SUM(CASE WHEN is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW()) THEN 1 ELSE 0 END) as active,
+			SUM(CASE WHEN is_active = FALSE OR (expires_at IS NOT NULL AND expires_at <= NOW()) THEN 1 ELSE 0 END) as expired
 		FROM user_permissions_temp 
 		WHERE user_id = ?`
 	

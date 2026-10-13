@@ -62,7 +62,7 @@ func (s *ScheduleService) PreviewSchedule(req *model.ScheduleRequest) (*model.Sc
 	}
 
 	// 1b. 拉取用户基础信息（ID -> User 映射）
-	usersList, _ := s.userDAO.GetUsersByIDs(userIDs)
+	usersList, _ := s.userDAO.GetUsersByIDs(userIDs, "")
 	userMap := make(map[int]model.User)
 	for _, u := range usersList {
 		userMap[u.ID] = u

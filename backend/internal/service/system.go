@@ -557,7 +557,7 @@ func (s *SystemService) CreateAdmin(studentID, name, email, password, department
 		Role:       model.RoleAdmin,
 		Department: department,
 		DeptRole:   model.RoleDeptAdmin,
-		IsActive:   true,
+		EmploymentStatus: model.EmploymentStatusActive,
 	}, nil
 }
 

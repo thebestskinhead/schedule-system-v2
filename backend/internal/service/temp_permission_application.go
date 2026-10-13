@@ -101,7 +101,7 @@ func (e *TempPermissionExecutor) OnApproved(ctx context.Context, app *model.Appl
 		Permission: model.Permission(data.Permission),
 		GrantedBy:  approval.ApproverID,
 		CreatedAt:  time.Now(),
-		ExpiresAt:  data.ExpiryDate,
+		ExpiresAt:  &data.ExpiryDate,
 		IsActive:   true,
 	}
 
@@ -138,7 +138,7 @@ func (e *TempPermissionExecutor) GetRequiredApprovers(ctx context.Context, app *
 
 	if isGlobalPermission(data.Permission) {
 		// 全局权限（如 user:manage:all, schedule:manage:all）→ 发给办公室管理员或系统管理员
-		officeAdmins, err := e.userDao.GetByDepartmentAndRole(model.DepartmentOffice, model.RoleDeptAdmin)
+		officeAdmins, err := e.userDao.GetByDepartmentAndRole(model.DepartmentOffice, model.RoleDeptAdmin, model.EmploymentStatusActive)
 		if err == nil {
 			for _, admin := range officeAdmins {
 				if admin.ID != app.ApplicantID {
@@ -147,7 +147,7 @@ func (e *TempPermissionExecutor) GetRequiredApprovers(ctx context.Context, app *
 			}
 		}
 		if len(approverIDs) == 0 {
-			admins, err := e.userDao.GetByRole(model.RoleAdmin)
+			admins, err := e.userDao.GetByRole(model.RoleAdmin, model.EmploymentStatusActive)
 			if err != nil {
 				return nil, err
 			}
@@ -159,7 +159,7 @@ func (e *TempPermissionExecutor) GetRequiredApprovers(ctx context.Context, app *
 		}
 	} else {
 		// 部门级权限 → 发给部门管理员，无则回退到办公室管理员或系统管理员
-		deptAdmins, err := e.userDao.GetByDepartmentAndRole(applicant.Department, model.RoleDeptAdmin)
+		deptAdmins, err := e.userDao.GetByDepartmentAndRole(applicant.Department, model.RoleDeptAdmin, model.EmploymentStatusActive)
 		if err != nil {
 			return nil, err
 		}
@@ -169,7 +169,7 @@ func (e *TempPermissionExecutor) GetRequiredApprovers(ctx context.Context, app *
 			}
 		}
 		if len(approverIDs) == 0 {
-			officeAdmins, err := e.userDao.GetByDepartmentAndRole(model.DepartmentOffice, model.RoleDeptAdmin)
+			officeAdmins, err := e.userDao.GetByDepartmentAndRole(model.DepartmentOffice, model.RoleDeptAdmin, model.EmploymentStatusActive)
 			if err == nil {
 				for _, admin := range officeAdmins {
 					if admin.ID != app.ApplicantID {
@@ -179,7 +179,7 @@ func (e *TempPermissionExecutor) GetRequiredApprovers(ctx context.Context, app *
 			}
 		}
 		if len(approverIDs) == 0 {
-			admins, err := e.userDao.GetByRole(model.RoleAdmin)
+			admins, err := e.userDao.GetByRole(model.RoleAdmin, model.EmploymentStatusActive)
 			if err != nil {
 				return nil, err
 			}
@@ -239,7 +239,7 @@ func (e *TempPermissionExecutor) CanApply(ctx context.Context, userID int, data 
 		return false, "查询权限记录失败"
 	}
 	for _, perm := range existingPerms {
-		if string(perm.Permission) == appData.Permission && perm.ExpiresAt.After(time.Now()) {
+		if string(perm.Permission) == appData.Permission && (perm.ExpiresAt == nil || perm.ExpiresAt.After(time.Now())) {
 			return false, "您已拥有该权限，无需重复申请"
 		}
 	}

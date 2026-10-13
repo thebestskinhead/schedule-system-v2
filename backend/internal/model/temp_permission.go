@@ -8,7 +8,7 @@ type GrantPermissionRequest struct {
 	Permission   Permission `json:"permission" binding:"required"`
 	ResourceType string     `json:"resource_type" binding:"required,oneof=all dept user"`
 	ResourceID   int        `json:"resource_id"`
-	ExpiresAt    time.Time  `json:"expires_at" binding:"required"`
+	ExpiresAt    *time.Time `json:"expires_at"` // 可空 = 永久
 	Reason       string     `json:"reason"`
 }
 
@@ -18,7 +18,7 @@ type SingleGrantRequest struct {
 	Permission   Permission
 	ResourceType string
 	ResourceID   int
-	ExpiresAt    time.Time
+	ExpiresAt    *time.Time
 	Reason       string
 }
 
@@ -29,33 +29,33 @@ type RevokePermissionRequest struct {
 
 // TempPermissionView 临时权限视图
 type TempPermissionView struct {
-	ID           int        `json:"id"`
-	UserID       int        `json:"user_id"`
-	UserName     string     `json:"user_name"`
-	Permission   Permission `json:"permission"`
-	PermissionName string   `json:"permission_name"`
-	ResourceType string     `json:"resource_type"`
-	ResourceID   int        `json:"resource_id"`
-	ResourceName string     `json:"resource_name"`
-	GrantedBy    int        `json:"granted_by"`
-	GrantedByName string    `json:"granted_by_name"`
-	Reason       string     `json:"reason"`
-	CreatedAt    time.Time  `json:"created_at"`
-	ExpiresAt    time.Time  `json:"expires_at"`
-	IsActive     bool       `json:"is_active"`
-	IsExpired    bool       `json:"is_expired"`
+	ID             int        `json:"id"`
+	UserID         int        `json:"user_id"`
+	UserName       string     `json:"user_name"`
+	Permission     Permission `json:"permission"`
+	PermissionName string     `json:"permission_name"`
+	ResourceType   string     `json:"resource_type"`
+	ResourceID     int        `json:"resource_id"`
+	ResourceName   string     `json:"resource_name"`
+	GrantedBy      int        `json:"granted_by"`
+	GrantedByName  string     `json:"granted_by_name"`
+	Reason         string     `json:"reason"`
+	CreatedAt      time.Time  `json:"created_at"`
+	ExpiresAt      *time.Time `json:"expires_at"`
+	IsActive       bool       `json:"is_active"`
+	IsExpired      bool       `json:"is_expired"`
 }
 
 // MyPermissionView 我的权限视图
 type MyPermissionView struct {
-	ID           int        `json:"id"`
-	Permission   Permission `json:"permission"`
-	PermissionName string   `json:"permission_name"`
-	ResourceType string     `json:"resource_type"`
-	ResourceName string     `json:"resource_name"`
-	Reason       string     `json:"reason"`
-	ExpiresAt    time.Time  `json:"expires_at"`
-	DaysLeft     int        `json:"days_left"`
+	ID             int        `json:"id"`
+	Permission     Permission `json:"permission"`
+	PermissionName string     `json:"permission_name"`
+	ResourceType   string     `json:"resource_type"`
+	ResourceName   string     `json:"resource_name"`
+	Reason         string     `json:"reason"`
+	ExpiresAt      *time.Time `json:"expires_at"`
+	DaysLeft       int        `json:"days_left"`
 }
 
 // PermissionInfo 权限信息
@@ -110,7 +110,7 @@ func GetPermissionName(perm Permission) string {
 			return info.Name
 		}
 	}
-	
+
 	// 未找到则返回原始代码
 	return string(perm)
 }
