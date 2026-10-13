@@ -259,17 +259,6 @@ func (s *SystemService) executeInitSQL(database *sql.DB) error {
 		return fmt.Errorf("创建duty_records表失败: %v", err)
 	}
 
-	// 值班次数统计表
-	_, err = database.Exec(`CREATE TABLE IF NOT EXISTS duty_counters (
-		user_id INT PRIMARY KEY COMMENT '用户ID',
-		total_count INT DEFAULT 0 COMMENT '总值班次数',
-		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-	) ENGINE=InnoDB COMMENT='值班次数统计'`)
-	if err != nil {
-		return fmt.Errorf("创建duty_counters表失败: %v", err)
-	}
-
 	// 排班设置表
 	_, err = database.Exec(`CREATE TABLE IF NOT EXISTS schedule_settings (
 		id INT PRIMARY KEY AUTO_INCREMENT,

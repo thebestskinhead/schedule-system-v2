@@ -1,6 +1,7 @@
 package dao
 
 import (
+	"github.com/jmoiron/sqlx"
 	"schedule-system-v2/backend/internal/db"
 	"schedule-system-v2/backend/internal/model"
 )
@@ -126,14 +127,20 @@ func (d *DutyDAO) CountByUserAndDay(userID, week, weekday int) (int64, error) {
 	return count, err
 }
 
-// BatchCountByUsers 批量查询全历史排班次数
+// BatchCountByUsers 批量查询全历史排班次数（来自 users.duty_count，口径 status <> 'cancelled'）
 func (d *DutyDAO) BatchCountByUsers(userIDs []int) (map[int]int64, error) {
 	result := make(map[int]int64)
 	if len(userIDs) == 0 {
 		return result, nil
 	}
-	query := `SELECT user_id, COUNT(*) as cnt FROM duty_records WHERE user_id IN (?) GROUP BY user_id`
-	rows, err := db.GetDB().Queryx(query, userIDs)
+	query := `SELECT id AS user_id, duty_count FROM users WHERE id IN (?) AND employment_status = 'active'`
+	args := []interface{}{userIDs}
+	query, args, err := sqlx.In(query, args...)
+	if err != nil {
+		return result, err
+	}
+	query = db.GetDB().Rebind(query)
+	rows, err := db.GetDB().Queryx(query, args...)
 	if err != nil {
 		return result, err
 	}
