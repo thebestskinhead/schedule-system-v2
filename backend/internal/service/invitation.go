@@ -169,7 +169,7 @@ func (s *InvitationService) sendActivationEmail(user *model.User, rawToken strin
 	if domain == "" {
 		domain = "http://localhost:8080"
 	}
-	activateURL := fmt.Sprintf("%s/activate?token=%s", domain, rawToken)
+	activateURL := fmt.Sprintf("%s/invitations/activate?token=%s", domain, rawToken)
 	return s.smtpService.SendInvitationEmail(user.Email, user.Name, activateURL)
 }
 

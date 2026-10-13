@@ -199,31 +199,69 @@
         style="margin-bottom: 16px"
       />
       <el-form :model="requestForm" :rules="requestRules" ref="requestFormRef" label-width="100px">
-        <el-form-item label="申请权限" prop="permission">
-          <el-select v-model="requestForm.permission" placeholder="选择需要的权限" style="width: 100%">
-            <el-option 
-              v-for="perm in availablePermissions" 
-              :key="perm.key" 
-              :label="perm.name" 
-              :value="perm.key" 
-            />
-          </el-select>
+        <el-form-item label="申请类型">
+          <el-radio-group v-model="requestForm.apply_type">
+            <el-radio-button label="temp_permission">临时权限</el-radio-button>
+            <el-radio-button label="leave">请假</el-radio-button>
+          </el-radio-group>
         </el-form-item>
+
+        <template v-if="requestForm.apply_type === 'temp_permission'">
+          <el-form-item label="申请权限" prop="permission">
+            <el-select v-model="requestForm.permission" placeholder="选择需要的权限" style="width: 100%">
+              <el-option 
+                v-for="perm in availablePermissions" 
+                :key="perm.key" 
+                :label="perm.name" 
+                :value="perm.key" 
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="期望到期日" prop="expiry_date">
+            <el-date-picker
+              v-model="requestForm.expiry_date"
+              type="datetime"
+              placeholder="选择到期日期时间（留空表示永久）"
+              style="width: 100%"
+              :disabled-date="disabledDate"
+            />
+          </el-form-item>
+        </template>
+
+        <template v-else>
+          <el-form-item label="请假类型" prop="leave_type">
+            <el-select v-model="requestForm.leave_type" placeholder="选择请假类型" style="width: 100%">
+              <el-option label="病假" value="sick" />
+              <el-option label="事假" value="personal" />
+              <el-option label="年假" value="annual" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="开始日期" prop="start_date">
+            <el-date-picker
+              v-model="requestForm.start_date"
+              type="date"
+              placeholder="选择开始日期"
+              style="width: 100%"
+              value-format="YYYY-MM-DD"
+            />
+          </el-form-item>
+          <el-form-item label="结束日期" prop="end_date">
+            <el-date-picker
+              v-model="requestForm.end_date"
+              type="date"
+              placeholder="选择结束日期"
+              style="width: 100%"
+              value-format="YYYY-MM-DD"
+            />
+          </el-form-item>
+        </template>
+
         <el-form-item label="申请原因" prop="reason">
           <el-input 
             v-model="requestForm.reason" 
             type="textarea" 
             rows="3"
-            placeholder="请详细说明申请原因（如：因XX原因需要临时管理权限）"
-          />
-        </el-form-item>
-        <el-form-item label="期望到期日" prop="expiry_date">
-          <el-date-picker
-            v-model="requestForm.expiry_date"
-            type="datetime"
-            placeholder="选择到期日期时间"
-            style="width: 100%"
-            :disabled-date="disabledDate"
+            placeholder="请详细说明申请原因"
           />
         </el-form-item>
       </el-form>
@@ -413,9 +451,13 @@ const canApprove = computed(() => userStore.isAdmin || userStore.isOfficeAdmin |
 
 // 表单数据
 const requestForm = reactive({
+  apply_type: 'temp_permission', // temp_permission | leave
   permission: '',
   reason: '',
-  expiry_date: null
+  expiry_date: null,
+  leave_type: 'personal',
+  start_date: null,
+  end_date: null
 })
 
 const grantForm = reactive({
@@ -429,12 +471,16 @@ const approvalForm = reactive({
   comment: ''
 })
 
-// 表单规则
-const requestRules = {
-  permission: [{ required: true, message: '请选择申请权限' }],
-  reason: [{ required: true, message: '请填写申请原因' }],
-  expiry_date: [{ required: true, message: '请选择期望到期日' }]
-}
+// 表单规则（按申请类型动态校验）
+const requestRules = computed(() => requestForm.apply_type === 'leave'
+  ? {
+      reason: [{ required: true, message: '请填写请假事由' }]
+    }
+  : {
+      permission: [{ required: true, message: '请选择申请权限' }],
+      reason: [{ required: true, message: '请填写申请原因' }],
+      expiry_date: [{ required: false }] // 留空 = 永久
+    })
 
 const grantRules = {
   user_ids: [{ required: true, message: '请至少选择一个用户', type: 'array', min: 1 }],
@@ -488,10 +534,10 @@ const getAppTypeName = (type) => appTypeMap[type] || type
 const getStatusText = (status) => statusMap[status]?.text || '未知'
 const getStatusType = (status) => statusMap[status]?.type || 'info'
 
-const isExpired = (time) => new Date(time) < new Date()
+const isExpired = (time) => !!time && new Date(time) < new Date()
 
 const formatTime = (time) => {
-  if (!time) return '-'
+  if (!time) return '永久'
   const date = new Date(time)
   return date.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
@@ -635,9 +681,13 @@ const filterUsers = (query) => {
 // 打开对话框
 const openRequestDialog = () => {
   requestDialogVisible.value = true
+  requestForm.apply_type = 'temp_permission'
   requestForm.permission = ''
   requestForm.reason = ''
   requestForm.expiry_date = null
+  requestForm.leave_type = 'personal'
+  requestForm.start_date = null
+  requestForm.end_date = null
   loadAvailablePermissions()
 }
 
@@ -673,18 +723,41 @@ const submitRequest = async () => {
   const valid = await requestFormRef.value.validate().catch(() => false)
   if (!valid) return
 
+  const isLeave = requestForm.apply_type === 'leave'
+  if (isLeave) {
+    if (!requestForm.start_date || !requestForm.end_date) {
+      ElMessage.warning('请选择请假的开始与结束日期')
+      return
+    }
+    if (requestForm.end_date < requestForm.start_date) {
+      ElMessage.warning('结束日期不能早于开始日期')
+      return
+    }
+  }
+
   requesting.value = true
   try {
-    const data = {
-      type: 'temp_permission',
-      data: {
-        permission: requestForm.permission,
-        expiry_date: requestForm.expiry_date,
-        reason: requestForm.reason
-      },
-      reason: requestForm.reason
-    }
-    
+    const data = isLeave
+      ? {
+          type: 'leave',
+          data: {
+            leave_type: requestForm.leave_type,
+            start_date: requestForm.start_date,
+            end_date: requestForm.end_date,
+            reason: requestForm.reason
+          },
+          reason: requestForm.reason
+        }
+      : {
+          type: 'temp_permission',
+          data: {
+            permission: requestForm.permission,
+            expiry_date: requestForm.expiry_date,
+            reason: requestForm.reason
+          },
+          reason: requestForm.reason
+        }
+
     await createApplication(data)
     ElMessage.success('申请已提交，请等待管理员审批')
     requestDialogVisible.value = false

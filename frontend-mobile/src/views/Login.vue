@@ -44,7 +44,7 @@
             </button>
           </form>
           <div class="footer">
-            还没有账号？<router-link to="/register" class="text-link" style="font-size:13px;">立即注册</router-link>
+            账号由管理员录入，如需开通请联系管理员
           </div>
 
           <div class="qr-login-area">
@@ -122,7 +122,7 @@ async function handleLogin() {
       router.push('/')
     }, 800)
   } catch (error) {
-    showToast(error.message || '登录失败')
+    // 后端错误（含「账号待激活 / 已离职」）由响应拦截器统一 toast 展示
   } finally {
     loading.value = false
   }

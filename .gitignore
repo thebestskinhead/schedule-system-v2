@@ -82,3 +82,9 @@ temp/
 # 本地项目数据与临时验证产物
 .workbuddy/
 .verify_test/
+
+# 待用户审批的删除归档（按次分子目录）
+_deleted/
+
+# vite 构建临时配置
+*.timestamp-*.mjs

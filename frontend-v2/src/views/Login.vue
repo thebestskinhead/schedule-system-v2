@@ -44,7 +44,7 @@
             </button>
           </form>
           <div class="footer">
-            还没有账号？<router-link to="/register" class="text-link" style="font-size:13px;">立即注册</router-link>
+            账号由管理员统一录入
           </div>
 
           <div class="qr-login-divider">
@@ -123,7 +123,15 @@ async function handleLogin() {
     ElMessage.success('登录成功')
     router.push('/')
   } catch (error) {
-    // 错误已在请求拦截器处理
+    // 后端消息已含「待激活 / 离职」字样，据此区分提示；兜底展示后端 message
+    const msg = error?.message || ''
+    if (msg.includes('待激活')) {
+      showToast('账号待激活，请查收激活邮件完成激活后再登录')
+    } else if (msg.includes('离职')) {
+      showToast('账号已离职，请联系管理员')
+    } else {
+      showToast(msg || '登录失败，请检查学号或密码')
+    }
   } finally {
     loading.value = false
   }

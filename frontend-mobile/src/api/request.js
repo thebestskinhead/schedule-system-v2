@@ -55,7 +55,7 @@ request.interceptors.response.use(
       localStorage.removeItem('token')
       router.push('/login')
     }
-    return Promise.reject(error)
+    return Promise.reject(new Error(message))
   }
 )
 

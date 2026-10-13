@@ -116,14 +116,8 @@ function startPolling() {
         router.push('/')
         return
       } else if (res.status === 'need_reg') {
+        // 已录入未激活（pending）由后端返回 error 状态并提示「账号待激活，请查收激活邮件」
         status.value = 'need_reg'
-        setTimeout(() => {
-          visible.value = false
-          router.push({
-            name: 'Register',
-            query: { student_id: res.student_id, name: res.name }
-          })
-        }, 1500)
         return
       } else if (res.status === 'expired' || res.status === 'error') {
         status.value = res.status

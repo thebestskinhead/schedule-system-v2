@@ -31,6 +31,7 @@
           </div>
           <div class="action-bar" v-else>
             <van-button type="primary" size="small" icon="plus" @click="openRequestDialog">申请权限</van-button>
+            <van-button type="primary" size="small" icon="calendar-o" @click="openLeaveDialog">请假申请</van-button>
           </div>
 
           <div v-if="loading" class="loading-wrapper">
@@ -282,8 +283,8 @@
               is-link
               readonly
               label="到期日期"
-              placeholder="选择到期日期时间"
-              :rules="[{ required: true, message: '请选择到期日期' }]"
+              placeholder="选择到期日期（留空为永久）"
+              :rules="[]"
               @click="showGrantExpiryPicker = true"
             />
             <van-field

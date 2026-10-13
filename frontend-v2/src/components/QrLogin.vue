@@ -40,8 +40,8 @@
           <div class="qr-icon-wrap success">
             <span>&#10003;</span>
           </div>
-          <p class="qr-tip">扫码成功，但账号未注册</p>
-          <p class="qr-sub">即将跳转到注册页面...</p>
+          <p class="qr-tip">扫码成功</p>
+          <p class="qr-sub">{{ message || '该学号未录入，请联系管理员录入正式成员' }}</p>
         </div>
       </div>
     </div>
@@ -112,14 +112,15 @@ function startPolling() {
         router.push('/')
         return
       } else if (res.status === 'need_reg') {
+        // 公开注册已删除：不再跳转注册页。
+        // 区分「已录入但未激活」与「未录入」：后端 message 含「待激活」字样时优先提示激活。
         status.value = 'need_reg'
-        setTimeout(() => {
-          visible.value = false
-          router.push({
-            name: 'Register',
-            query: { student_id: res.student_id, name: res.name }
-          })
-        }, 1500)
+        const msg = res.message || ''
+        if (msg.includes('待激活')) {
+          message.value = '账号待激活，请查收激活邮件完成激活后再登录'
+        } else {
+          message.value = '该学号未录入，请联系管理员录入正式成员'
+        }
         return
       } else if (res.status === 'expired' || res.status === 'error') {
         status.value = res.status

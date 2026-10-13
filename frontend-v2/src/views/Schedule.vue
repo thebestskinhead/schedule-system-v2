@@ -498,7 +498,11 @@ const conflicts = computed(() => {
 const availableUsers = computed(() => {
   if (!addForm.rowData) return []
   const selected = new Set(addForm.rowData.users.map(u => u.id))
-  return allUsers.value.filter(u => !selected.has(u.id)).map(u => ({ value: u.id, label: `${u.name} (${u.student_id})` }))
+  return allUsers.value
+    // 仅在职（排除待入职/离职），且排除部门管理员
+    .filter(u => u.employment_status === 'active' && u.dept_role !== 'dept_admin')
+    .filter(u => !selected.has(u.id))
+    .map(u => ({ value: u.id, label: `${u.name} (${u.student_id})` }))
 })
 
 // 部门是否锁定（非管理员自动锁定为自己的部门）
