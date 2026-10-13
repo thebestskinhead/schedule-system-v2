@@ -282,8 +282,9 @@ func (s *QRLoginService) Poll(sessionID string) *model.QRPollResponse {
 			}
 		}
 
-		// 未注册
-		session.SetResult(model.QRStatusNeedReg, "请先注册账号")
+		// 未注册：彻底删除公开注册后，未录入学号无法自助注册，需联系管理员录入正式成员
+		// （若该学号已录入但 employment_status='pending'，已在上方分支提示「账号待激活」）
+		session.SetResult(model.QRStatusNeedReg, "该学号未录入，请联系管理员录入正式成员")
 		session.ExpiresAt = time.Now().Add(30 * time.Second)
 		return &model.QRPollResponse{
 			Status:    model.QRStatusNeedReg,

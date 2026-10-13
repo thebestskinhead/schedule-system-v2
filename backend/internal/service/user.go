@@ -10,59 +10,15 @@ import (
 type UserService struct {
 	userDAO    *dao.UserDAO
 	systemDAO  *dao.SystemDAO
+	resignDAO  *dao.ResignDAO
 }
 
 func NewUserService() *UserService {
 	return &UserService{
 		userDAO:   dao.NewUserDAO(),
 		systemDAO: dao.NewSystemDAO(),
+		resignDAO: dao.NewResignDAO(),
 	}
-}
-
-func (s *UserService) Register(req *model.RegisterRequest) (*model.User, error) {
-	existing, _ := s.userDAO.GetByStudentID(req.StudentID)
-	if existing != nil {
-		return nil, errors.New("学号已注册")
-	}
-
-	existingEmail, _ := s.userDAO.GetByEmail(req.Email)
-	if existingEmail != nil {
-		return nil, errors.New("邮箱已被使用")
-	}
-
-	hashedPassword, err := utils.HashPassword(req.Password)
-	if err != nil {
-		return nil, err
-	}
-
-	role := model.RoleUser
-	deptRole := model.RoleDeptMember
-	initialized, _ := s.systemDAO.IsInitialized()
-	if !initialized {
-		role = model.RoleAdmin
-		deptRole = model.RoleDeptAdmin
-	}
-
-	user := &model.User{
-		StudentID:  req.StudentID,
-		Name:       req.Name,
-		Email:      req.Email,
-		Password:   hashedPassword,
-		Role:       role,
-		Department: req.Department,
-		DeptRole:   deptRole,
-		EmploymentStatus: model.EmploymentStatusActive,
-	}
-
-	if err := s.userDAO.Create(user); err != nil {
-		return nil, err
-	}
-
-	if !initialized {
-		s.systemDAO.SetInitialized()
-	}
-
-	return user, nil
 }
 
 func (s *UserService) Login(req *model.LoginRequest) (*model.LoginResponse, error) {
@@ -137,7 +93,8 @@ func (s *UserService) SetUserRole(targetUserID int, role string) error {
 }
 
 func (s *UserService) DeleteUser(id, adminID int) error {
-	return s.userDAO.Delete(id, adminID)
+	// 离职语义统一收口到 ResignUser（见 H.4.1）：删除即标记离职，避免两套实现并存
+	return s.ResignUser(adminID, id)
 }
 
 // GetUserListByDepartment 按部门获取用户列表
@@ -268,12 +225,8 @@ func (s *UserService) AdminUpdateUser(targetUserID int, req *model.AdminUpdateUs
 // - 处理所有关联数据的外键约束
 // - 或者匿名化处理后删除
 func (s *UserService) AdminDeleteUser(operatorID, targetUserID int) error {
-	// 不能删除自己
-	if operatorID == targetUserID {
-		return errors.New("不能删除自己")
-	}
-
-	return s.userDAO.Delete(targetUserID, operatorID)
+	// 离职语义统一收口到 ResignUser（见 H.4.1）：单点权威实现，DeleteUser 亦复用之
+	return s.ResignUser(operatorID, targetUserID)
 }
 
 // ChangePassword 修改用户密码

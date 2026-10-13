@@ -61,15 +61,6 @@ func DepartmentID(name string) int {
 	}
 }
 
-// RegisterRequest 注册请求
-type RegisterRequest struct {
-	StudentID  string `json:"student_id" binding:"required"`
-	Name       string `json:"name" binding:"required"`
-	Email      string `json:"email" binding:"required,email"`
-	Password   string `json:"password" binding:"required,min=6"`
-	Department string `json:"department" binding:"required"`
-}
-
 // LoginRequest 登录请求
 type LoginRequest struct {
 	StudentID string `json:"student_id"`

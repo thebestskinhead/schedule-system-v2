@@ -61,7 +61,14 @@ func (d *AvailabilityDAO) GetAvailableUsers(week, weekday, period int) ([]model.
 		FROM users u 
 		JOIN availability a ON u.id = a.user_id 
 		WHERE a.week = ? AND a.weekday = ? AND a.period = ? AND u.employment_status = 'active'
-		AND u.dept_role != 'dept_admin'`
+		AND u.dept_role != 'dept_admin'
+		AND NOT EXISTS (
+			SELECT 1 FROM leave_requests lr
+			WHERE lr.user_id = u.id AND lr.status = 'approved'
+			  AND DATE_ADD((SELECT semester_start_date FROM schedule_settings WHERE config_key = 'global'),
+						   INTERVAL (a.week - 1) * 7 + (a.weekday - 1) DAY)
+			      BETWEEN lr.start_date AND lr.end_date
+		)`
 	err := db.GetDB().Select(&users, query, week, weekday, period)
 	return users, err
 }
@@ -75,7 +82,14 @@ func (d *AvailabilityDAO) GetAvailableUsersForSchedule(week, weekday, period int
 		WHERE a.week = ? AND a.weekday = ? AND a.period = ? 
 		AND u.employment_status = 'active' 
 		AND u.department = ?
-		AND u.dept_role != 'dept_admin'`
+		AND u.dept_role != 'dept_admin'
+		AND NOT EXISTS (
+			SELECT 1 FROM leave_requests lr
+			WHERE lr.user_id = u.id AND lr.status = 'approved'
+			  AND DATE_ADD((SELECT semester_start_date FROM schedule_settings WHERE config_key = 'global'),
+						   INTERVAL (a.week - 1) * 7 + (a.weekday - 1) DAY)
+			      BETWEEN lr.start_date AND lr.end_date
+		)`
 	err := db.GetDB().Select(&users, query, week, weekday, period, department)
 	return users, err
 }

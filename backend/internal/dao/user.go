@@ -24,6 +24,20 @@ func (d *UserDAO) Create(user *model.User) error {
 	return nil
 }
 
+// CreatePending 创建「待入职」用户：显式置 employment_status='pending'（占位密码，不可登录）。
+// 占位密码由调用方用 bcrypt("123456") 预先生成后写入 user.Password。
+func (d *UserDAO) CreatePending(user *model.User) error {
+	query := `INSERT INTO users (student_id, name, email, password, role, department, dept_role, employment_status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`
+	result, err := db.GetDB().Exec(query, user.StudentID, user.Name, user.Email, user.Password, user.Role, user.Department, user.DeptRole)
+	if err != nil {
+		return err
+	}
+	id, _ := result.LastInsertId()
+	user.ID = int(id)
+	return nil
+}
+
 // GetByID 单点查询：不过滤 employment_status（返回真实行，便于 service 层区分 不存在/待激活/已离职）
 func (d *UserDAO) GetByID(id int) (*model.User, error) {
 	var user model.User

@@ -31,6 +31,7 @@ type Handlers struct {
 	TempPerm     *handler.TempPermissionHandler
 	SMTP         *handler.SMTPHandler
 	QRLogin      *handler.QRLoginHandler
+	Invitation   *handler.InvitationHandler
 	Application  *handler.ApplicationHandler // 可能为 nil（未安装时）
 }
 
@@ -47,10 +48,12 @@ func buildRoutes(h *Handlers) []RouteDef {
 		{Method: "GET", Path: "/smtp/check", Handler: h.SMTP.CheckConfig},
 		{Method: "POST", Path: "/password/reset-request", Handler: h.SMTP.SendPasswordReset},
 		{Method: "GET", Path: "/password/reset-verify", Handler: h.SMTP.VerifyResetToken},
-		{Method: "POST", Path: "/password/reset", Handler: h.SMTP.ResetPassword},
+			{Method: "POST", Path: "/password/reset", Handler: h.SMTP.ResetPassword},
 
-		{Method: "POST", Path: "/user/register", Handler: h.User.Register},
 		{Method: "POST", Path: "/user/login", Handler: h.User.Login},
+
+		// ========== 邀请激活（公开，受邀人自助） ==========
+		{Method: "POST", Path: "/invitations/activate", Handler: h.Invitation.ActivateInvitation},
 
 		{Method: "POST", Path: "/qr/login/start", Handler: h.QRLogin.StartQrLogin},
 		{Method: "POST", Path: "/qr/login/poll", Handler: h.QRLogin.PollQrLogin},
@@ -100,6 +103,17 @@ func buildRoutes(h *Handlers) []RouteDef {
 		{Method: "PUT", Path: "/admin/users/:id/department", Auth: true, Perms: []auth.Permission{auth.PermUserManage}, Handler: h.User.SetUserDepartment},
 		{Method: "PUT", Path: "/admin/users/:id/dept-role", Auth: true, Perms: []auth.Permission{auth.PermUserManage}, Handler: h.User.SetUserDeptRole},
 		{Method: "GET", Path: "/admin/users/filter", Auth: true, Perms: []auth.Permission{auth.PermUserManage}, Handler: h.User.GetUsersByFilter},
+
+		// ========== 录入正式成员（邀请激活链路） ==========
+		{Method: "POST", Path: "/admin/members", Auth: true, Perms: []auth.Permission{auth.PermUserManage}, Handler: h.Invitation.CreateMember},
+		{Method: "POST", Path: "/admin/members/batch", Auth: true, Perms: []auth.Permission{auth.PermUserManage}, Handler: h.Invitation.BatchCreateMembers},
+		{Method: "POST", Path: "/admin/members/:id/resend-invite", Auth: true, Perms: []auth.Permission{auth.PermUserManage}, Handler: h.Invitation.ResendInvite},
+		{Method: "POST", Path: "/admin/members/:id/revoke", Auth: true, Perms: []auth.Permission{auth.PermUserManage}, Handler: h.Invitation.RevokeInvite},
+
+		// ========== 离职（单/批，换届制 H.4.1） ==========
+		{Method: "POST", Path: "/admin/members/:id/resign", Auth: true, Perms: []auth.Permission{auth.PermUserManage}, Handler: h.User.ResignUser},
+		{Method: "POST", Path: "/admin/members/batch-resign/preview", Auth: true, Perms: []auth.Permission{auth.PermUserManage}, Handler: h.User.BatchResignPreview},
+		{Method: "POST", Path: "/admin/members/batch-resign", Auth: true, Perms: []auth.Permission{auth.PermUserManage}, Handler: h.User.BatchResign},
 
 		// ========== 无课表（管理员） ==========
 		{Method: "GET", Path: "/admin/availability/all", Auth: true, Perms: []auth.Permission{auth.PermAvailabilityViewAll}, Handler: h.Availability.GetAllAvailability},

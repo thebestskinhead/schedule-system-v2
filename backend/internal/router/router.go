@@ -95,6 +95,7 @@ func SetupRouter() *gin.Engine {
 		TempPerm:     handler.NewTempPermissionHandler(),
 		SMTP:         handler.NewSMTPHandler(),
 		QRLogin:      handler.NewQRLoginHandler(),
+		Invitation:   handler.NewInvitationHandler(),
 	}
 
 	// 初始化应用系统相关服务
@@ -109,6 +110,12 @@ func SetupRouter() *gin.Engine {
 		// 注册临权申请执行器
 		tempPermExecutor := service.NewTempPermissionExecutor(userDao, tempPermissionDao, applicationDao)
 		appManager.Register(tempPermExecutor)
+
+		// 注册请假申请执行器（H.4.2）：OnApproved 调 sp_approve_leave
+		dutyDao := dao.NewDutyDAO()
+		leaveRequestDao := dao.NewLeaveRequestDAO()
+		leaveExecutor := service.NewLeaveExecutor(userDao, leaveRequestDao, dutyDao, applicationDao)
+		appManager.Register(leaveExecutor)
 
 		handlers.Application = handler.NewApplicationHandler(applicationService)
 	}

@@ -20,30 +20,6 @@ func NewUserHandler() *UserHandler {
 	}
 }
 
-func (h *UserHandler) Register(c *gin.Context) {
-	var req model.RegisterRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.Error(c, 400, "参数错误")
-		return
-	}
-
-	user, err := h.service.Register(&req)
-	if err != nil {
-		utils.Error(c, 400, err.Error())
-		return
-	}
-
-	utils.Success(c, model.UserInfo{
-		ID:         user.ID,
-		StudentID:  user.StudentID,
-		Name:       user.Name,
-		Email:      user.Email,
-		Role:       user.Role,
-		Department: user.Department,
-		DeptRole:   user.DeptRole,
-	})
-}
-
 func (h *UserHandler) Login(c *gin.Context) {
 	var req model.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -607,4 +583,80 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 	}
 
 	utils.Success(c, nil)
+}
+
+// ResignUser 单个离职（H.4.1）：POST /admin/members/:id/resign
+func (h *UserHandler) ResignUser(c *gin.Context) {
+	checker := auth.GetChecker(c)
+	if !checker.HasPermission(auth.PermUserManage) {
+		auth.ResponseForbidden(c, "无权离职用户")
+		return
+	}
+
+	idStr := c.Param("id")
+	userID, err := strconv.Atoi(idStr)
+	if err != nil {
+		utils.Error(c, 400, "无效的用户ID")
+		return
+	}
+
+	operatorID := auth.GetUserIDFromContext(c)
+	if err := h.service.ResignUser(operatorID, userID); err != nil {
+		utils.Error(c, 403, err.Error())
+		return
+	}
+
+	utils.Success(c, gin.H{"message": "该用户已标记为离职"})
+}
+
+// BatchResignRequest 批量离职请求体（H.4.1）
+type BatchResignRequest struct {
+	UserIDs    []int `json:"user_ids"`
+	ExcludeIDs []int `json:"exclude_ids"`
+}
+
+// BatchResignPreview 批量离职预览（只读）：POST /admin/members/batch-resign/preview
+func (h *UserHandler) BatchResignPreview(c *gin.Context) {
+	checker := auth.GetChecker(c)
+	if !checker.HasPermission(auth.PermUserManage) {
+		auth.ResponseForbidden(c, "无权离职用户")
+		return
+	}
+
+	var req BatchResignRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.Error(c, 400, "参数错误: "+err.Error())
+		return
+	}
+
+	preview, err := h.service.BatchResignPreview(req.UserIDs, req.ExcludeIDs)
+	if err != nil {
+		utils.Error(c, 500, err.Error())
+		return
+	}
+
+	utils.Success(c, preview)
+}
+
+// BatchResign 批量离职执行：POST /admin/members/batch-resign
+func (h *UserHandler) BatchResign(c *gin.Context) {
+	checker := auth.GetChecker(c)
+	if !checker.HasPermission(auth.PermUserManage) {
+		auth.ResponseForbidden(c, "无权离职用户")
+		return
+	}
+
+	var req BatchResignRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.Error(c, 400, "参数错误: "+err.Error())
+		return
+	}
+
+	result, err := h.service.BatchResign(auth.GetUserIDFromContext(c), req.UserIDs, req.ExcludeIDs)
+	if err != nil {
+		utils.Error(c, 403, err.Error())
+		return
+	}
+
+	utils.Success(c, result)
 }

@@ -165,6 +165,29 @@ func (s *SMTPService) ResetPassword(token string, newPassword string) error {
 	return s.smtpDAO.MarkTokenUsed(t.ID)
 }
 
+// SendInvitationEmail 发送「录入正式成员」激活邀请邮件
+func (s *SMTPService) SendInvitationEmail(email, name, activateURL string) error {
+	smtpConfig, err := s.smtpDAO.GetConfig()
+	if err != nil {
+		return fmt.Errorf("邮件服务未配置: %v", err)
+	}
+
+	subject := "账号激活邀请 - 排班系统"
+	body := fmt.Sprintf(`
+<h2>欢迎加入排班系统</h2>
+<p>您好 %s，</p>
+<p>管理员已为您录入正式成员账号，请点击以下链接设置登录密码并完成激活（链接 7 天内有效）：</p>
+<p><a href="%s" style="padding: 10px 20px; background: #409eff; color: white; text-decoration: none; border-radius: 4px;">激活账号</a></p>
+<p>或复制以下链接到浏览器：</p>
+<p>%s</p>
+<p>若非本人操作，请忽略此邮件。</p>
+<br>
+<p>排班系统</p>
+`, name, activateURL, activateURL)
+
+	return s.sendEmail(smtpConfig, email, subject, body)
+}
+
 // sendEmail 发送邮件（内部方法）
 func (s *SMTPService) sendEmail(smtpConfig *model.SMTPConfig, to, subject, body string) error {
 	m := gomail.NewMessage()
