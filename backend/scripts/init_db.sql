@@ -2,7 +2,7 @@
 -- 排班系统 V2.1 数据库初始化脚本（完整全新安装）
 -- 权威来源：sched_migrate（迁移后目标结构），与迁移后库结构差异为 0
 -- 执行：mysql -h<host> -u<user> -p < init_db.sql
--- 末尾附 3 触发器 + 9 存储过程 + 1 事件（照抄 013_add_db_logic.sql）
+-- 末尾附 9 存储过程 + 1 事件（照抄 013_add_db_logic.sql）
 -- ============================================================
 
 CREATE DATABASE IF NOT EXISTS schedule_system_v2
@@ -43,7 +43,6 @@ CREATE TABLE `users` (
   `department` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT '科普部' COMMENT '所属部门',
   `dept_role` enum('dept_admin','dept_member') COLLATE utf8mb4_unicode_ci DEFAULT 'dept_member' COMMENT '部门角色',
   `employment_status` enum('pending','active','resigned') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'active' COMMENT '任职状态: 待入职/在职/离职(取代is_active)',
-  `duty_count` int NOT NULL DEFAULT '0' COMMENT '值班次数(触发器维护, 排班算法读取)',
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -194,6 +193,7 @@ CREATE TABLE `duty_records` (
   KEY `idx_time` (`week`,`weekday`,`period`),
   KEY `assigned_by` (`assigned_by`),
   KEY `idx_user_week` (`user_id`,`week`),
+  KEY `idx_user_status` (`user_id`,`status`),
   CONSTRAINT `duty_records_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
   CONSTRAINT `duty_records_ibfk_2` FOREIGN KEY (`assigned_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
   CONSTRAINT `chk_duty_period` CHECK ((`period` between 1 and 4)),
@@ -453,35 +453,12 @@ VALUES ('global', 1, 1, 0, 2, 0, 1, 2, '第{week}周排班表', NULL);
 
 -- ============================================================
 
--- 触发器 + 存储过程 + 事件（照抄 013_add_db_logic.sql，保留 DELIMITER）
+-- 存储过程 + 事件（照抄 013_add_db_logic.sql，保留 DELIMITER；触发器已移除）
 
 -- ============================================================
 
 
 DELIMITER //
-
--- ===================================================================
--- §6 触发器：users.duty_count 自动维护（口径 status <> 'cancelled'）
--- ===================================================================
-
-DROP TRIGGER IF EXISTS trg_duty_count_ai //
-CREATE TRIGGER trg_duty_count_ai AFTER INSERT ON duty_records FOR EACH ROW
-IF NEW.status <> 'cancelled' THEN
-    UPDATE users SET duty_count = duty_count + 1, updated_at = NOW() WHERE id = NEW.user_id;
-END IF //
-
-DROP TRIGGER IF EXISTS trg_duty_count_ad //
-CREATE TRIGGER trg_duty_count_ad AFTER DELETE ON duty_records FOR EACH ROW
-IF OLD.status <> 'cancelled' THEN
-    UPDATE users SET duty_count = duty_count - 1, updated_at = NOW() WHERE id = OLD.user_id;
-END IF //
-
-DROP TRIGGER IF EXISTS trg_duty_count_au //
-CREATE TRIGGER trg_duty_count_au AFTER UPDATE ON duty_records FOR EACH ROW
-IF (OLD.status <> 'cancelled') <> (NEW.status <> 'cancelled') THEN
-    UPDATE users SET duty_count = duty_count + IF(NEW.status <> 'cancelled', 1, -1),
-           updated_at = NOW() WHERE id = NEW.user_id;
-END IF //
 
 -- ===================================================================
 -- §7.1 排班确认（原子替换整周 + 全局互斥锁 + 已确认守卫）
@@ -499,28 +476,14 @@ BEGIN
               WHERE week = p_week AND status IN ('confirmed','completed')) THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '该周已有已确认或完成的排班，禁止重排';
     END IF;
-    -- ③ 预取部门映射：本存储过程原稿用 INSERT...SELECT JOIN users 取部门，
-    --    但 AFTER INSERT 触发器会改写 users.duty_count；同一语句既读 users 又由触发器写 users
-    --    在 MySQL 8.0 会触发错误 1442（ER_CANT_UPDATE_USED_TABLE_IN_SF_OR_TRG）。
-    --    改用临时表承载部门映射，使触发触发器的 INSERT 不再直接读取 users。
-    DROP TEMPORARY TABLE IF EXISTS _sp_dept_map;
-    CREATE TEMPORARY TABLE _sp_dept_map (user_id INT PRIMARY KEY, department VARCHAR(50));
-    INSERT INTO _sp_dept_map (user_id, department)
-        SELECT DISTINCT ju.user_id, u.department
-        FROM JSON_TABLE(p_cells, '$[*]' COLUMNS (
-            weekday INT PATH '$.weekday', period INT PATH '$.period',
-            user_ids JSON PATH '$.user_ids')) jt
-        CROSS JOIN JSON_TABLE(jt.user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) ju
-        JOIN users u ON u.id = ju.user_id;
     DELETE FROM duty_records WHERE week = p_week;
     INSERT INTO duty_records (week, weekday, period, user_id, department, assigned_by, status)
-    SELECT p_week, jt.weekday, jt.period, ju.user_id, dm.department, p_admin_id, 'pending'
+    SELECT DISTINCT p_week, jt.weekday, jt.period, ju.user_id, u.department, p_admin_id, 'pending'
     FROM JSON_TABLE(p_cells, '$[*]' COLUMNS (
         weekday INT PATH '$.weekday', period INT PATH '$.period',
         user_ids JSON PATH '$.user_ids')) jt
     CROSS JOIN JSON_TABLE(jt.user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) ju
-    JOIN _sp_dept_map dm ON dm.user_id = ju.user_id;
-    DROP TEMPORARY TABLE IF EXISTS _sp_dept_map;
+    JOIN users u ON u.id = ju.user_id;
     COMMIT;
 END //
 
@@ -637,19 +600,11 @@ BEGIN
         WHERE week = p_week AND weekday = p_weekday AND period = p_period
           AND user_id IN (SELECT CAST(jt.user_id AS UNSIGNED)
                           FROM JSON_TABLE(p_remove_user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) jt);
-    -- 部门映射预取到临时表，避免触发器 1442（同 sp_confirm_schedule）
-    DROP TEMPORARY TABLE IF EXISTS _sp_dept_map;
-    CREATE TEMPORARY TABLE _sp_dept_map (user_id INT PRIMARY KEY, department VARCHAR(50));
-    INSERT INTO _sp_dept_map (user_id, department)
-        SELECT ju.user_id, u.department
-        FROM JSON_TABLE(p_add_user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) ju
-        JOIN users u ON u.id = ju.user_id
-        WHERE u.employment_status = 'active';
     INSERT IGNORE INTO duty_records (week, weekday, period, user_id, department, assigned_by, status)
-    SELECT p_week, p_weekday, p_period, ju.user_id, dm.department, p_admin_id, 'pending'
+    SELECT p_week, p_weekday, p_period, ju.user_id, u.department, p_admin_id, 'pending'
     FROM JSON_TABLE(p_add_user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) ju
-    JOIN _sp_dept_map dm ON dm.user_id = ju.user_id;
-    DROP TEMPORARY TABLE IF EXISTS _sp_dept_map;
+    JOIN users u ON u.id = ju.user_id
+    WHERE u.employment_status = 'active';
     COMMIT;
 END //
 

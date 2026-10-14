@@ -2,17 +2,16 @@
 -- 结构优化迁移（依据 docs/数据库.md v2.1 §5 / §11）
 -- 执行顺序：备份 → users 扩展 → duty_records 去重+约束 → schedule_settings 单例化
 --          → user_permissions_temp → password_reset_tokens → 审批流三表 → availability
---          → 回填 duty_count → 删除 duty_counters
+--          → 删除 duty_counters
 -- 注意：本迁移假定运行在 init_db.sql + 003~010 之后的现有结构之上。
 
 -- ① 备份 duty_counters（§11 前置备份；IF NOT EXISTS 保证可重复执行不报错）
 CREATE TABLE IF NOT EXISTS duty_counters_backup_20261013 AS SELECT * FROM duty_counters;
 
--- ② users 扩展字段：任职状态（取代 is_active）+ 值班次数冗余（§5.1 ①）
+-- ② users 扩展字段：任职状态（取代 is_active）（§5.1 ①）
 ALTER TABLE users
     ADD COLUMN employment_status ENUM('pending','active','resigned') NOT NULL DEFAULT 'active'
-        COMMENT '任职状态: 待入职/在职/离职(取代is_active)' AFTER dept_role,
-    ADD COLUMN duty_count INT NOT NULL DEFAULT 0 COMMENT '值班次数(触发器维护, 排班算法读取)' AFTER employment_status;
+        COMMENT '任职状态: 待入职/在职/离职(取代is_active)' AFTER dept_role;
 
 -- ③ 存量回填：is_active 语义迁移到 employment_status（§5.1 ②）
 UPDATE users SET employment_status = 'active' WHERE is_active = 1;
@@ -31,6 +30,7 @@ JOIN duty_records d2
 ALTER TABLE duty_records
     ADD UNIQUE KEY uk_duty_cell (week, weekday, period, user_id),
     ADD KEY idx_user_week (user_id, week),
+    ADD KEY idx_user_status (user_id, status),
     ADD CONSTRAINT chk_duty_week CHECK (week BETWEEN 1 AND 30),
     ADD CONSTRAINT chk_duty_weekday CHECK (weekday BETWEEN 1 AND 5),
     ADD CONSTRAINT chk_duty_period CHECK (period BETWEEN 1 AND 4);
@@ -85,10 +85,9 @@ ALTER TABLE availability
     ADD CONSTRAINT chk_avail_weekday CHECK (weekday BETWEEN 1 AND 5),
     ADD CONSTRAINT chk_avail_period CHECK (period BETWEEN 1 AND 4);
 
--- ⑪ 回填 users.duty_count（口径：status != 'cancelled'，与 §6 触发器口径一致，§5.8）
-UPDATE users u SET duty_count = (
-    SELECT COUNT(*) FROM duty_records dr
-    WHERE dr.user_id = u.id AND dr.status <> 'cancelled');
+-- ⑪ 值班次数不再冗余存储于 users 表，改为运行时聚合
+--    （SELECT user_id, COUNT(*) FROM duty_records WHERE status <> 'cancelled' GROUP BY user_id），
+--    故此处不再回填任何列（§5.8）。
 
--- ⑫ 删除 duty_counters（并入 users.duty_count，触发器维护，§5.8）
+-- ⑫ 删除 duty_counters（历史计数表，已由运行时聚合取代，§5.8）
 DROP TABLE IF EXISTS duty_counters;

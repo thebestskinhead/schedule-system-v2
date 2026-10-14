@@ -88,14 +88,6 @@ type ScheduleConfirmRequest struct {
 	Grid [][]ScheduleCell `json:"grid" binding:"required"`
 }
 
-// DutyCounter 值班统计
-type DutyCounter struct {
-	UserID     int       `json:"user_id" db:"user_id"`
-	UserName   string    `json:"user_name,omitempty" db:"-"`
-	TotalCount int       `json:"total_count" db:"total_count"`
-	UpdatedAt  time.Time `json:"updated_at" db:"updated_at"`
-}
-
 // DutyQuery 值班查询
 type DutyQuery struct {
 	Week    int `form:"week"`

@@ -85,7 +85,7 @@ func (d *UserDAO) IsEmpty() (bool, error) {
 // List 列表查询：默认返回全部状态；employmentStatus 非空时按状态筛选（空串 = 不过滤）
 func (d *UserDAO) List(employmentStatus string) ([]model.User, error) {
 	var users []model.User
-	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, duty_count, created_at FROM users`
+	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, created_at FROM users`
 	args := []interface{}{}
 	if employmentStatus != "" {
 		query += ` WHERE employment_status = ?`
@@ -159,7 +159,7 @@ func (d *UserDAO) GetUsersByIDs(userIDs []int, employmentStatus string) ([]model
 	if len(userIDs) == 0 {
 		return []model.User{}, nil
 	}
-	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, duty_count, created_at FROM users WHERE id IN (?)`
+	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, created_at FROM users WHERE id IN (?)`
 	args := []interface{}{userIDs}
 	if employmentStatus != "" {
 		query += ` AND employment_status = ?`
@@ -180,7 +180,7 @@ func (d *UserDAO) GetUsersByIDs(userIDs []int, employmentStatus string) ([]model
 // ListByDepartment 按部门获取用户列表：默认全状态；employmentStatus 非空时按状态筛选
 func (d *UserDAO) ListByDepartment(dept, employmentStatus string) ([]model.User, error) {
 	var users []model.User
-	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, duty_count, created_at 
+	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, created_at 
 			  FROM users WHERE department = ?`
 	args := []interface{}{dept}
 	if employmentStatus != "" {
@@ -199,7 +199,7 @@ func (d *UserDAO) ListByDepartments(depts []string, employmentStatus string) ([]
 	}
 
 	// 使用 sqlx.In 处理 IN 查询
-	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, duty_count, created_at 
+	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, created_at 
 			  FROM users WHERE department IN (?)`
 	args := []interface{}{depts}
 	if employmentStatus != "" {
@@ -219,7 +219,7 @@ func (d *UserDAO) ListByDepartments(depts []string, employmentStatus string) ([]
 
 // ListByFilter 根据筛选条件获取用户列表：默认全状态；employmentStatus 非空时按状态筛选
 func (d *UserDAO) ListByFilter(filter model.UserListFilter, employmentStatus string) ([]model.User, error) {
-	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, duty_count, created_at 
+	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, created_at 
 			  FROM users WHERE 1=1`
 	var args []interface{}
 
@@ -262,7 +262,7 @@ func (d *UserDAO) ListByFilter(filter model.UserListFilter, employmentStatus str
 // GetByDeptRole 获取指定部门角色的用户：默认全状态；employmentStatus 非空时按状态筛选
 func (d *UserDAO) GetByDeptRole(deptRole, employmentStatus string) ([]model.User, error) {
 	var users []model.User
-	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, duty_count, created_at 
+	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, created_at 
 			  FROM users WHERE dept_role = ?`
 	args := []interface{}{deptRole}
 	if employmentStatus != "" {
@@ -277,7 +277,7 @@ func (d *UserDAO) GetByDeptRole(deptRole, employmentStatus string) ([]model.User
 // GetByDepartmentAndRole 按部门和角色获取用户：默认全状态；employmentStatus 非空时按状态筛选
 func (d *UserDAO) GetByDepartmentAndRole(department, deptRole, employmentStatus string) ([]model.User, error) {
 	var users []model.User
-	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, duty_count, created_at 
+	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, created_at 
 			  FROM users WHERE department = ? AND dept_role = ?`
 	args := []interface{}{department, deptRole}
 	if employmentStatus != "" {
@@ -292,7 +292,7 @@ func (d *UserDAO) GetByDepartmentAndRole(department, deptRole, employmentStatus 
 // GetByRole 按系统角色获取用户：默认全状态；employmentStatus 非空时按状态筛选
 func (d *UserDAO) GetByRole(role, employmentStatus string) ([]model.User, error) {
 	var users []model.User
-	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, duty_count, created_at 
+	query := `SELECT id, student_id, name, email, role, department, dept_role, employment_status, created_at 
 			  FROM users WHERE role = ?`
 	args := []interface{}{role}
 	if employmentStatus != "" {

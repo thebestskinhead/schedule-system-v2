@@ -127,13 +127,13 @@ func (d *DutyDAO) CountByUserAndDay(userID, week, weekday int) (int64, error) {
 	return count, err
 }
 
-// BatchCountByUsers 批量查询全历史排班次数（来自 users.duty_count，口径 status <> 'cancelled'）
+// BatchCountByUsers 批量查询全历史有效排班次数（实时聚合 duty_records，口径 status <> 'cancelled'，走索引 idx_user_status）
 func (d *DutyDAO) BatchCountByUsers(userIDs []int) (map[int]int64, error) {
 	result := make(map[int]int64)
 	if len(userIDs) == 0 {
 		return result, nil
 	}
-	query := `SELECT id AS user_id, duty_count FROM users WHERE id IN (?) AND employment_status = 'active'`
+	query := `SELECT user_id, COUNT(*) AS cnt FROM duty_records WHERE user_id IN (?) AND status <> 'cancelled' GROUP BY user_id`
 	args := []interface{}{userIDs}
 	query, args, err := sqlx.In(query, args...)
 	if err != nil {

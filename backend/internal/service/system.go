@@ -208,7 +208,6 @@ func (s *SystemService) executeInitSQL(database *sql.DB) error {
 		department VARCHAR(50) DEFAULT '科普部' COMMENT '所属部门',
 		dept_role ENUM('dept_admin', 'dept_member') DEFAULT 'dept_member' COMMENT '部门角色',
 		employment_status ENUM('pending','active','resigned') NOT NULL DEFAULT 'active' COMMENT '任职状态: 待入职/在职/离职(取代is_active)',
-		duty_count INT NOT NULL DEFAULT 0 COMMENT '值班次数(触发器维护, 排班算法读取)',
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 		INDEX idx_role (role),
@@ -257,6 +256,7 @@ func (s *SystemService) executeInitSQL(database *sql.DB) error {
 		INDEX idx_time (week, weekday, period),
 		UNIQUE KEY uk_duty_cell (week, weekday, period, user_id),
 		INDEX idx_user_week (user_id, week),
+		INDEX idx_user_status (user_id, status),
 		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
 		FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL,
 		CONSTRAINT chk_duty_week CHECK (week BETWEEN 1 AND 30),
@@ -587,7 +587,7 @@ func (s *SystemService) executeInitSQL(database *sql.DB) error {
 		return fmt.Errorf("插入列表模板失败: %v", err)
 	}
 
-	// 注册数据库逻辑对象（触发器 + 存储过程 + 事件），定义与 migrations/013 保持一致
+	// 注册数据库逻辑对象（存储过程 + 事件），定义与 migrations/013 保持一致
 	if err := s.registerDBLogic(database); err != nil {
 		return fmt.Errorf("注册数据库逻辑对象失败: %v", err)
 	}
@@ -595,32 +595,12 @@ func (s *SystemService) executeInitSQL(database *sql.DB) error {
 	return nil
 }
 
-// registerDBLogic 创建触发器、存储过程与事件（定义照抄 migrations/013）。
+// registerDBLogic 创建存储过程与事件（定义照抄 migrations/013）。
 // 每个对象作为独立的 SQL 语句执行（不含 mysql 客户端的 DELIMITER），
 // DROP ... IF EXISTS 保证幂等。复用调用方传入的连接（multiStatements=true，
-// 单条 CREATE PROCEDURE/TRIGGER/EVENT 语句由服务端正确解析，不受过程体内分号影响）。
+// 单条 CREATE PROCEDURE/EVENT 语句由服务端正确解析，不受过程体内分号影响）。
 func (s *SystemService) registerDBLogic(database *sql.DB) error {
 	stmts := []string{
-		// ===== 触发器：users.duty_count 自动维护 =====
-		`DROP TRIGGER IF EXISTS trg_duty_count_ai`,
-		`CREATE TRIGGER trg_duty_count_ai AFTER INSERT ON duty_records FOR EACH ROW
-IF NEW.status <> 'cancelled' THEN
-    UPDATE users SET duty_count = duty_count + 1, updated_at = NOW() WHERE id = NEW.user_id;
-END IF`,
-
-		`DROP TRIGGER IF EXISTS trg_duty_count_ad`,
-		`CREATE TRIGGER trg_duty_count_ad AFTER DELETE ON duty_records FOR EACH ROW
-IF OLD.status <> 'cancelled' THEN
-    UPDATE users SET duty_count = duty_count - 1, updated_at = NOW() WHERE id = OLD.user_id;
-END IF`,
-
-		`DROP TRIGGER IF EXISTS trg_duty_count_au`,
-		`CREATE TRIGGER trg_duty_count_au AFTER UPDATE ON duty_records FOR EACH ROW
-IF (OLD.status <> 'cancelled') <> (NEW.status <> 'cancelled') THEN
-    UPDATE users SET duty_count = duty_count + IF(NEW.status <> 'cancelled', 1, -1),
-           updated_at = NOW() WHERE id = NEW.user_id;
-END IF`,
-
 		// ===== 存储过程 =====
 		`DROP PROCEDURE IF EXISTS sp_confirm_schedule`,
 		`CREATE PROCEDURE sp_confirm_schedule(IN p_week INT, IN p_admin_id INT, IN p_cells JSON)
@@ -632,24 +612,14 @@ BEGIN
               WHERE week = p_week AND status IN ('confirmed','completed')) THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '该周已有已确认或完成的排班，禁止重排';
     END IF;
-    DROP TEMPORARY TABLE IF EXISTS _sp_dept_map;
-    CREATE TEMPORARY TABLE _sp_dept_map (user_id INT PRIMARY KEY, department VARCHAR(50));
-    INSERT INTO _sp_dept_map (user_id, department)
-        SELECT DISTINCT ju.user_id, u.department
-        FROM JSON_TABLE(p_cells, '$[*]' COLUMNS (
-            weekday INT PATH '$.weekday', period INT PATH '$.period',
-            user_ids JSON PATH '$.user_ids')) jt
-        CROSS JOIN JSON_TABLE(jt.user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) ju
-        JOIN users u ON u.id = ju.user_id;
     DELETE FROM duty_records WHERE week = p_week;
     INSERT INTO duty_records (week, weekday, period, user_id, department, assigned_by, status)
-    SELECT p_week, jt.weekday, jt.period, ju.user_id, dm.department, p_admin_id, 'pending'
+    SELECT DISTINCT p_week, jt.weekday, jt.period, ju.user_id, u.department, p_admin_id, 'pending'
     FROM JSON_TABLE(p_cells, '$[*]' COLUMNS (
         weekday INT PATH '$.weekday', period INT PATH '$.period',
         user_ids JSON PATH '$.user_ids')) jt
     CROSS JOIN JSON_TABLE(jt.user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) ju
-    JOIN _sp_dept_map dm ON dm.user_id = ju.user_id;
-    DROP TEMPORARY TABLE IF EXISTS _sp_dept_map;
+    JOIN users u ON u.id = ju.user_id;
     COMMIT;
 END`,
 
@@ -750,18 +720,11 @@ BEGIN
         WHERE week = p_week AND weekday = p_weekday AND period = p_period
           AND user_id IN (SELECT CAST(jt.user_id AS UNSIGNED)
                           FROM JSON_TABLE(p_remove_user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) jt);
-    DROP TEMPORARY TABLE IF EXISTS _sp_dept_map;
-    CREATE TEMPORARY TABLE _sp_dept_map (user_id INT PRIMARY KEY, department VARCHAR(50));
-    INSERT INTO _sp_dept_map (user_id, department)
-        SELECT ju.user_id, u.department
-        FROM JSON_TABLE(p_add_user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) ju
-        JOIN users u ON u.id = ju.user_id
-        WHERE u.employment_status = 'active';
     INSERT IGNORE INTO duty_records (week, weekday, period, user_id, department, assigned_by, status)
-    SELECT p_week, p_weekday, p_period, ju.user_id, dm.department, p_admin_id, 'pending'
+    SELECT p_week, p_weekday, p_period, ju.user_id, u.department, p_admin_id, 'pending'
     FROM JSON_TABLE(p_add_user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) ju
-    JOIN _sp_dept_map dm ON dm.user_id = ju.user_id;
-    DROP TEMPORARY TABLE IF EXISTS _sp_dept_map;
+    JOIN users u ON u.id = ju.user_id
+    WHERE u.employment_status = 'active';
     COMMIT;
 END`,
 

@@ -13,7 +13,6 @@ type User struct {
 	Department       string    `json:"department" db:"department"`
 	DeptRole         string    `json:"dept_role" db:"dept_role"`
 	EmploymentStatus string    `json:"employment_status" db:"employment_status"`
-	DutyCount        int       `json:"duty_count" db:"duty_count"`
 	CreatedAt        time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at" db:"updated_at"`
 }

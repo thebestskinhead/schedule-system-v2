@@ -1,31 +1,8 @@
 -- 013_add_db_logic.sql
--- 触发器 + 存储过程 + 事件调度（依据 docs/数据库.md v2.1 §6 / §7 / §8 / §12.2 / §12.4.6）
--- 注意：本文件含存储过程/触发器/事件，必须使用 DELIMITER 以正确分隔语句。
+-- 存储过程 + 事件调度（依据 docs/数据库.md v2.1 §7 / §8 / §12.2 / §12.4.6）
+-- 注意：本文件含存储过程/事件，必须使用 DELIMITER 以正确分隔语句。
 
 DELIMITER //
-
--- ===================================================================
--- §6 触发器：users.duty_count 自动维护（口径 status <> 'cancelled'）
--- ===================================================================
-
-DROP TRIGGER IF EXISTS trg_duty_count_ai //
-CREATE TRIGGER trg_duty_count_ai AFTER INSERT ON duty_records FOR EACH ROW
-IF NEW.status <> 'cancelled' THEN
-    UPDATE users SET duty_count = duty_count + 1, updated_at = NOW() WHERE id = NEW.user_id;
-END IF //
-
-DROP TRIGGER IF EXISTS trg_duty_count_ad //
-CREATE TRIGGER trg_duty_count_ad AFTER DELETE ON duty_records FOR EACH ROW
-IF OLD.status <> 'cancelled' THEN
-    UPDATE users SET duty_count = duty_count - 1, updated_at = NOW() WHERE id = OLD.user_id;
-END IF //
-
-DROP TRIGGER IF EXISTS trg_duty_count_au //
-CREATE TRIGGER trg_duty_count_au AFTER UPDATE ON duty_records FOR EACH ROW
-IF (OLD.status <> 'cancelled') <> (NEW.status <> 'cancelled') THEN
-    UPDATE users SET duty_count = duty_count + IF(NEW.status <> 'cancelled', 1, -1),
-           updated_at = NOW() WHERE id = NEW.user_id;
-END IF //
 
 -- ===================================================================
 -- §7.1 排班确认（原子替换整周 + 全局互斥锁 + 已确认守卫）
@@ -43,28 +20,14 @@ BEGIN
               WHERE week = p_week AND status IN ('confirmed','completed')) THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '该周已有已确认或完成的排班，禁止重排';
     END IF;
-    -- ③ 预取部门映射：本存储过程原稿用 INSERT...SELECT JOIN users 取部门，
-    --    但 AFTER INSERT 触发器会改写 users.duty_count；同一语句既读 users 又由触发器写 users
-    --    在 MySQL 8.0 会触发错误 1442（ER_CANT_UPDATE_USED_TABLE_IN_SF_OR_TRG）。
-    --    改用临时表承载部门映射，使触发触发器的 INSERT 不再直接读取 users。
-    DROP TEMPORARY TABLE IF EXISTS _sp_dept_map;
-    CREATE TEMPORARY TABLE _sp_dept_map (user_id INT PRIMARY KEY, department VARCHAR(50));
-    INSERT INTO _sp_dept_map (user_id, department)
-        SELECT DISTINCT ju.user_id, u.department
-        FROM JSON_TABLE(p_cells, '$[*]' COLUMNS (
-            weekday INT PATH '$.weekday', period INT PATH '$.period',
-            user_ids JSON PATH '$.user_ids')) jt
-        CROSS JOIN JSON_TABLE(jt.user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) ju
-        JOIN users u ON u.id = ju.user_id;
     DELETE FROM duty_records WHERE week = p_week;
     INSERT INTO duty_records (week, weekday, period, user_id, department, assigned_by, status)
-    SELECT p_week, jt.weekday, jt.period, ju.user_id, dm.department, p_admin_id, 'pending'
+    SELECT DISTINCT p_week, jt.weekday, jt.period, ju.user_id, u.department, p_admin_id, 'pending'
     FROM JSON_TABLE(p_cells, '$[*]' COLUMNS (
         weekday INT PATH '$.weekday', period INT PATH '$.period',
         user_ids JSON PATH '$.user_ids')) jt
     CROSS JOIN JSON_TABLE(jt.user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) ju
-    JOIN _sp_dept_map dm ON dm.user_id = ju.user_id;
-    DROP TEMPORARY TABLE IF EXISTS _sp_dept_map;
+    JOIN users u ON u.id = ju.user_id;
     COMMIT;
 END //
 
@@ -181,19 +144,11 @@ BEGIN
         WHERE week = p_week AND weekday = p_weekday AND period = p_period
           AND user_id IN (SELECT CAST(jt.user_id AS UNSIGNED)
                           FROM JSON_TABLE(p_remove_user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) jt);
-    -- 部门映射预取到临时表，避免触发器 1442（同 sp_confirm_schedule）
-    DROP TEMPORARY TABLE IF EXISTS _sp_dept_map;
-    CREATE TEMPORARY TABLE _sp_dept_map (user_id INT PRIMARY KEY, department VARCHAR(50));
-    INSERT INTO _sp_dept_map (user_id, department)
-        SELECT ju.user_id, u.department
-        FROM JSON_TABLE(p_add_user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) ju
-        JOIN users u ON u.id = ju.user_id
-        WHERE u.employment_status = 'active';
     INSERT IGNORE INTO duty_records (week, weekday, period, user_id, department, assigned_by, status)
-    SELECT p_week, p_weekday, p_period, ju.user_id, dm.department, p_admin_id, 'pending'
+    SELECT p_week, p_weekday, p_period, ju.user_id, u.department, p_admin_id, 'pending'
     FROM JSON_TABLE(p_add_user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) ju
-    JOIN _sp_dept_map dm ON dm.user_id = ju.user_id;
-    DROP TEMPORARY TABLE IF EXISTS _sp_dept_map;
+    JOIN users u ON u.id = ju.user_id
+    WHERE u.employment_status = 'active';
     COMMIT;
 END //
 

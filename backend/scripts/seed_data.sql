@@ -219,7 +219,7 @@ INSERT INTO duty_records (week, weekday, period, user_id, department, assigned_b
 (1, 2, 3, 6, '竞赛部', 1, 'confirmed'),  -- 钱七
 (1, 2, 4, 6, '竞赛部', 1, 'confirmed');  -- 钱七
 
--- 值班次数统计（duty_counters 已并入 users.duty_count，由触发器自动维护，无需此处写入）
+-- 值班次数统计：duty_counters 已删除，次数改为运行时聚合（无需此处写入）
 
 -- ============================================
 -- 完成
