@@ -43,12 +43,10 @@ func (h *TempPermissionHandler) GrantPermission(c *gin.Context) {
 	var failedUsers []string
 	for _, userID := range req.UserIDs {
 		singleReq := model.SingleGrantRequest{
-			UserID:       userID,
-			Permission:   req.Permission,
-			ResourceType: req.ResourceType,
-			ResourceID:   req.ResourceID,
-			ExpiresAt:    req.ExpiresAt,
-			Reason:       req.Reason,
+			UserID:     userID,
+			Permission: req.Permission,
+			ExpiresAt:  req.ExpiresAt,
+			Reason:     req.Reason,
 		}
 		if err := h.service.GrantPermission(adminID, checker, &singleReq); err != nil {
 			failedUsers = append(failedUsers, err.Error())

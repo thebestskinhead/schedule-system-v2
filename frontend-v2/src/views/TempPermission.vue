@@ -303,10 +303,11 @@
           <el-date-picker
             v-model="grantForm.expires_at"
             type="datetime"
-            placeholder="选择到期日期时间"
+            placeholder="选择到期日期时间（留空表示永久有效）"
             style="width: 100%"
             :disabled-date="disabledDate"
           />
+          <div class="form-tip">不选择日期则授权永久有效</div>
         </el-form-item>
         
         <el-form-item label="授权原因" prop="reason">
@@ -340,6 +341,9 @@
           </div>
           <div v-if="parseData(selectedApp.data).expiry_date">
             期望到期: {{ formatDate(parseData(selectedApp.data).expiry_date) }}
+          </div>
+          <div v-else>
+            期望到期: 永久有效
           </div>
         </el-descriptions-item>
         <el-descriptions-item label="申请原因">{{ selectedApp.content || selectedApp.reason || '-' }}</el-descriptions-item>
@@ -485,7 +489,7 @@ const requestRules = computed(() => requestForm.apply_type === 'leave'
 const grantRules = {
   user_ids: [{ required: true, message: '请至少选择一个用户', type: 'array', min: 1 }],
   permission: [{ required: true, message: '请选择权限类型' }],
-  expires_at: [{ required: true, message: '请选择到期日期' }]
+  expires_at: [{ required: false }] // 留空 = 永久
 }
 
 // 权限映射 - 统一使用冒号格式与后端一致
@@ -776,14 +780,10 @@ const submitGrant = async () => {
 
   granting.value = true
   try {
-    const expiresAt = new Date(grantForm.expires_at)
-    
     await grantTempPermission({
       user_ids: grantForm.user_ids,
       permission: grantForm.permission,
-      resource_type: 'all',
-      resource_id: 0,
-      expires_at: expiresAt.toISOString(),
+      expires_at: grantForm.expires_at ? new Date(grantForm.expires_at).toISOString() : null,
       reason: grantForm.reason
     })
     ElMessage.success(`成功授权 ${grantForm.user_ids.length} 位用户`)
@@ -858,6 +858,13 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.form-tip {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.4;
+  margin-top: 4px;
+}
+
 .stats-cards {
   display: flex;
   gap: 16px;

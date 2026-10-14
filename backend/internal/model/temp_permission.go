@@ -3,23 +3,20 @@ package model
 import "time"
 
 // GrantPermissionRequest 批量授权请求
+// 资源范围不在此传入：由后端按被授权人身份与权限语义推导，避免客户端越权指定全局范围。
 type GrantPermissionRequest struct {
-	UserIDs      []int      `json:"user_ids" binding:"required,min=1"`
-	Permission   Permission `json:"permission" binding:"required"`
-	ResourceType string     `json:"resource_type" binding:"required,oneof=all dept user"`
-	ResourceID   int        `json:"resource_id"`
-	ExpiresAt    *time.Time `json:"expires_at"` // 可空 = 永久
-	Reason       string     `json:"reason"`
+	UserIDs    []int      `json:"user_ids" binding:"required,min=1"`
+	Permission Permission `json:"permission" binding:"required"`
+	ExpiresAt  *time.Time `json:"expires_at"` // 可空 = 永久
+	Reason     string     `json:"reason"`
 }
 
 // SingleGrantRequest 单个授权请求（内部使用）
 type SingleGrantRequest struct {
-	UserID       int
-	Permission   Permission
-	ResourceType string
-	ResourceID   int
-	ExpiresAt    *time.Time
-	Reason       string
+	UserID     int
+	Permission Permission
+	ExpiresAt  *time.Time
+	Reason     string
 }
 
 // RevokePermissionRequest 撤销权限请求

@@ -99,7 +99,7 @@ BEGIN
      WHERE dr.status = 'pending';
     UPDATE user_permissions_temp pt
     JOIN JSON_TABLE(p_user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) jt ON pt.user_id = jt.user_id
-       SET pt.is_active = 0, pt.updated_at = NOW()
+       SET pt.is_active = 0
      WHERE pt.is_active = 1;
     COMMIT;
 END //

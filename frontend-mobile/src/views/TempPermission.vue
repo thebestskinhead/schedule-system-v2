@@ -151,6 +151,10 @@
                   <span class="pending-card-label">期望到期</span>
                   <span>{{ formatDate(parseData(item.data).expiry_date) }}</span>
                 </div>
+                <div class="pending-card-row" v-else-if="parseData(item.data).permission">
+                  <span class="pending-card-label">期望到期</span>
+                  <span>永久有效</span>
+                </div>
                 <div class="pending-card-row text-gray" v-if="item.content">
                   <span>{{ item.content }}</span>
                 </div>
@@ -216,8 +220,7 @@
               is-link
               readonly
               label="期望到期日"
-              placeholder="选择到期日期时间"
-              :rules="[{ required: true, message: '请选择期望到期日' }]"
+              placeholder="选择到期日期时间（留空表示永久有效）"
               @click="showExpiryDatePicker = true"
             />
           </van-cell-group>
@@ -386,6 +389,9 @@
                 </div>
                 <div v-if="parseData(selectedApp.data).expiry_date">
                   期望到期: {{ formatDate(parseData(selectedApp.data).expiry_date) }}
+                </div>
+                <div v-else-if="parseData(selectedApp.data).permission">
+                  期望到期: 永久有效
                 </div>
               </div>
             </template>
@@ -822,8 +828,6 @@ const submitGrant = async () => {
     await grantTempPermission({
       user_ids: grantForm.user_ids,
       permission: grantForm.permission,
-      resource_type: 'all',
-      resource_id: 0,
       expires_at: new Date(grantForm.expires_at).toISOString(),
       reason: grantForm.reason
     })

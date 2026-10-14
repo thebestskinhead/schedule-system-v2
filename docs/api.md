@@ -1547,12 +1547,12 @@ Authorization: Bearer <token>
 |------|------|------|------|
 | user_ids | []int | 是 | 用户ID数组（支持批量） |
 | permission | string | 是 | 权限代码 |
-| resource_type | string | 是 | `all`/`dept`/`user` |
-| resource_id | int | 否 | 资源ID |
-| expires_at | datetime | 是 | 过期时间(ISO 8601) |
+| expires_at | datetime | 否 | 过期时间(ISO 8601)，留空表示永久有效 |
 | reason | string | 否 | 授权原因 |
 
 **权限要求:** `user:manage:dept`
+
+资源范围由系统按被授权用户所在部门与权限语义确定：部门级权限限定在该用户所在部门，全局权限为全范围。授权范围不得超过授权人自身的有效权限范围。
 
 ### 2. 获取所有临时权限
 
@@ -1946,7 +1946,7 @@ Authorization: Bearer <token>
 | type | string | 是 | 申请类型: `temp_permission`(权限申请) / `leave`(请假申请) |
 | data | object | 是 | 申请数据（字段随 type 而定，见下） |
 | data.permission | string | 条件 | type=`temp_permission` 必填：申请的权限代码 |
-| data.expiry_date | datetime | 条件 | type=`temp_permission` 必填：期望到期时间 |
+| data.expiry_date | datetime | 否 | type=`temp_permission`：期望到期时间，留空表示永久有效 |
 | data.leave_type | string | 条件 | type=`leave` 必填：请假类型 `sick`(病假)/`personal`(事假)/`annual`(年假) |
 | data.start_date | date | 条件 | type=`leave` 必填：开始日期(YYYY-MM-DD) |
 | data.end_date | date | 条件 | type=`leave` 必填：结束日期(YYYY-MM-DD) |

@@ -337,9 +337,21 @@ func (h *UserHandler) SetUserDepartment(c *gin.Context) {
 		return
 	}
 
+	target, err := h.service.GetUserByID(userID)
+	if err != nil {
+		utils.Error(c, 404, "用户不存在")
+		return
+	}
+
 	var req model.UpdateUserDepartmentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.Error(c, 400, "参数错误")
+		return
+	}
+
+	// 权限边界：变更后身份派生出的权限集不得超出操作者自身范围（不因对象是自己或他人而放宽）
+	if !checker.CanGrantIdentity(target.Role, req.Department, target.DeptRole) {
+		auth.ResponseForbidden(c, "不得将用户调整为超出自身权限范围的身份")
 		return
 	}
 
@@ -366,9 +378,21 @@ func (h *UserHandler) SetUserDeptRole(c *gin.Context) {
 		return
 	}
 
+	target, err := h.service.GetUserByID(userID)
+	if err != nil {
+		utils.Error(c, 404, "用户不存在")
+		return
+	}
+
 	var req model.UpdateUserDeptRoleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.Error(c, 400, "参数错误")
+		return
+	}
+
+	// 权限边界：变更后身份派生出的权限集不得超出操作者自身范围（不因对象是自己或他人而放宽）
+	if !checker.CanGrantIdentity(target.Role, target.Department, req.DeptRole) {
+		auth.ResponseForbidden(c, "不得将用户调整为超出自身权限范围的身份")
 		return
 	}
 
@@ -458,6 +482,12 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 		return
 	}
 
+	// 权限边界：新建身份派生出的权限集不得超出操作者自身范围
+	if !checker.CanGrantIdentity(req.Role, req.Department, req.DeptRole) {
+		auth.ResponseForbidden(c, "不得创建超出自身权限范围的身份")
+		return
+	}
+
 	user, err := h.service.AdminCreateUser(&req)
 	if err != nil {
 		utils.Error(c, 403, err.Error())
@@ -538,6 +568,19 @@ func (h *UserHandler) AdminUpdateUser(c *gin.Context) {
 	// 不能修改自己的角色/部门（防止临时权限提权）
 	currentUserID := auth.GetUserIDFromContext(c)
 	if currentUserID == userID {
+		targetUser, err := h.service.GetUserByID(userID)
+		if err != nil {
+			utils.Error(c, 404, "用户不存在")
+			return
+		}
+		req.Role = targetUser.Role
+		req.Department = targetUser.Department
+		req.DeptRole = targetUser.DeptRole
+	}
+
+	// 权限边界：变更后身份派生出的权限集不得超出操作者自身范围。
+	// 组合更新按既有风格静默裁剪身份字段（保留其余字段更新），不整请求拒绝。
+	if !checker.CanGrantIdentity(req.Role, req.Department, req.DeptRole) {
 		targetUser, err := h.service.GetUserByID(userID)
 		if err != nil {
 			utils.Error(c, 404, "用户不存在")

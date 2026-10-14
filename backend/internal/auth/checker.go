@@ -78,12 +78,12 @@ func (c *Checker) UnifiedRole() string {
 	return ResolveRole(c.role, c.department, c.deptRole)
 }
 
-// EffectivePermissions 返回用户的完整有效权限集合（角色权限 ∪ 临时权限，权限组已展开）
-// 角色权限中部门级权限自动限定为用户所在部门。
-func (c *Checker) EffectivePermissions() []EffectivePerm {
+// EffectivePermissionsForIdentity 计算指定身份（role / department / dept_role）派生出的权限集（不含临时权限）。
+// 身份即策略组：同一身份在任何模块中都得到同一权限集，模块只比对权限集、不关心身份从何而来。
+func EffectivePermissionsForIdentity(role, department, deptRole string) []EffectivePerm {
 	perms := make([]EffectivePerm, 0, 32)
 
-	if c.IsAdmin() {
+	if role == model.RoleAdmin {
 		// 系统管理员：拥有全部权限（all 范围）
 		perms = append(perms, EffectivePerm{Permission: PermSystemAdmin, ResourceType: "all"})
 		for _, p := range RolePermissions[model.RoleAdmin] {
@@ -92,29 +92,35 @@ func (c *Checker) EffectivePermissions() []EffectivePerm {
 		return perms
 	}
 
-	// 1. 角色权限（统一角色）
-	role := c.UnifiedRole()
-	deptID := model.DepartmentID(c.department)
-	for _, p := range RolePermissions[role] {
+	// 角色权限（统一角色）；部门级权限自动限定为该身份所在部门。
+	unified := ResolveRole(role, department, deptRole)
+	deptID := model.DepartmentID(department)
+	for _, p := range RolePermissions[unified] {
 		rt := "all"
 		rid := 0
-		if deptScopedPermissions[p] && (role == model.RoleDeptAdmin || role == model.RoleDeptMember) {
+		if deptScopedPermissions[p] && (unified == model.RoleDeptAdmin || unified == model.RoleDeptMember) {
 			rt = "dept"
 			rid = deptID
 		}
 		perms = append(perms, EffectivePerm{Permission: p, ResourceType: rt, ResourceID: rid})
 	}
 
-	// 1.5 办公室管理员派生身份：department=办公室 && dept_role=dept_admin → 附加全局管理权限集。
-	// office_admin 不是存储角色（users.role 仅允许 admin/user），此判定在部门角色（dept_admin）
-	// 权限基础上叠加全局权限（all 范围），全局权限自动覆盖任意部门，等价于旧 office_admin 角色码查表。
-	if c.department == model.DepartmentOffice && c.deptRole == model.RoleDeptAdmin {
+	// 办公室管理员派生身份：department=办公室 && dept_role=dept_admin → 附加全局管理权限集（all 范围）。
+	// office_admin 不是存储角色（users.role 仅允许 admin/user），此判定在部门角色权限基础上叠加全局权限。
+	if department == model.DepartmentOffice && deptRole == model.RoleDeptAdmin {
 		for _, p := range officeAdminPermissions {
 			perms = append(perms, EffectivePerm{Permission: p, ResourceType: "all"})
 		}
 	}
 
-	// 2. 临时权限（带自身资源范围）
+	return perms
+}
+
+// EffectivePermissions 返回用户的完整有效权限集合（身份派生权限 ∪ 临时权限，权限组已展开）
+func (c *Checker) EffectivePermissions() []EffectivePerm {
+	perms := EffectivePermissionsForIdentity(c.role, c.department, c.deptRole)
+
+	// 临时权限（带自身资源范围）
 	for _, tp := range c.tempPerms {
 		perms = append(perms, EffectivePerm{
 			Permission:   tp.Permission,
@@ -124,6 +130,42 @@ func (c *Checker) EffectivePermissions() []EffectivePerm {
 	}
 
 	return perms
+}
+
+// Covers 判断本检查器的有效权限集是否覆盖「以指定范围持有某权限」。
+// 这是权限边界（permission boundary）判定：授予或变更权限时，不得超出自身范围。
+// 拥有 all 范围的权限覆盖任意范围；dept 范围仅覆盖同一部门。
+func (c *Checker) Covers(perm Permission, resourceType string, resourceID int) bool {
+	if c.IsAdmin() {
+		return true
+	}
+	for _, p := range c.EffectivePermissions() {
+		if p.Permission != perm && !permImplies(p.Permission, perm) {
+			continue
+		}
+		if p.ResourceType == "all" || p.ResourceType == "" {
+			return true
+		}
+		if p.ResourceType == resourceType && (p.ResourceID == 0 || p.ResourceID == resourceID) {
+			return true
+		}
+	}
+	return false
+}
+
+// CanGrantIdentity 判断本检查器是否可赋予目标身份（role / department / dept_role）。
+// 规则：目标身份派生出的权限集必须被操作者自身有效权限集完全覆盖，即
+// 「不得授予超出自身范围的权限」——无论对象是自己还是他人。
+func (c *Checker) CanGrantIdentity(role, department, deptRole string) bool {
+	if c.IsAdmin() {
+		return true
+	}
+	for _, tp := range EffectivePermissionsForIdentity(role, department, deptRole) {
+		if !c.Covers(tp.Permission, tp.ResourceType, tp.ResourceID) {
+			return false
+		}
+	}
+	return true
 }
 
 // HasPermission 检查是否拥有指定权限（不限资源范围）

@@ -49,17 +49,20 @@ func (s *TempPermissionService) GrantPermission(adminID int, checker *auth.Check
 		return errors.New("无效的权限代码")
 	}
 
-	// 检查授权人是否有权限授予此权限
-	if !s.canGrantPermission(checker, req.Permission, req.ResourceType) {
-		return errors.New("您没有权限授予此权限")
+	// 资源范围由后端按被授权人身份与权限语义推导，不接受客户端指定
+	resourceType, resourceID := auth.GrantResourceScope(req.Permission, user.Department)
+
+	// 权限边界：授予的范围不得超出授权人自身有效权限范围
+	if !s.canGrantPermission(checker, req.Permission, resourceType, resourceID) {
+		return errors.New("不得授予超出自身范围的权限")
 	}
 
 	// 创建权限记录
 	perm := &model.UserPermissionTemp{
 		UserID:       req.UserID,
 		Permission:   req.Permission,
-		ResourceType: req.ResourceType,
-		ResourceID:   req.ResourceID,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
 		GrantedBy:    adminID,
 		Reason:       req.Reason,
 		ExpiresAt:    req.ExpiresAt,
@@ -69,30 +72,10 @@ func (s *TempPermissionService) GrantPermission(adminID int, checker *auth.Check
 	return s.dao.Create(perm)
 }
 
-// canGrantPermission 检查授权人是否可以授予指定权限
-func (s *TempPermissionService) canGrantPermission(checker *auth.Checker, perm model.Permission, resourceType string) bool {
-	// 系统管理员可以授予任何权限
-	if checker.IsAdmin() {
-		return true
-	}
-
-	// 部门管理员/办公室管理员只能授予自己拥有的权限
-	switch perm {
-	case auth.PermScheduleManageDept, auth.PermScheduleViewDept:
-		// 排班部门管理权限
-		return checker.HasPermission(auth.PermScheduleManageDept)
-	case auth.PermUserManageDept:
-		// 部门用户管理权限
-		return checker.HasPermission(auth.PermUserManageDept)
-	case auth.PermScheduleViewAll:
-		// 全局排班查看权限
-		return checker.HasPermission(auth.PermScheduleViewAll)
-	case auth.PermUserManageAll:
-		// 全局用户管理权限
-		return checker.HasPermission(auth.PermUserManageAll)
-	default:
-		return false
-	}
+// canGrantPermission 检查授权人是否可以授予指定权限（指定资源范围）。
+// 判定依据是权限集包含关系，而非授权人身份：授权人自身有效权限集必须覆盖待授予的权限范围。
+func (s *TempPermissionService) canGrantPermission(checker *auth.Checker, perm model.Permission, resourceType string, resourceID int) bool {
+	return checker.Covers(perm, resourceType, resourceID)
 }
 
 // RevokePermission 撤销临时权限（带权限检查）

@@ -12,10 +12,11 @@ import (
 )
 
 // TempPermissionApplicationData 临权申请数据
+// ExpiryDate 为指针：nil 表示永久有效。
 type TempPermissionApplicationData struct {
-	Permission string    `json:"permission"`   // 申请的权限标识
-	ExpiryDate time.Time `json:"expiry_date"`  // 到期日期
-	Reason     string    `json:"reason"`       // 申请理由
+	Permission string     `json:"permission"`  // 申请的权限标识
+	ExpiryDate *time.Time `json:"expiry_date"` // 到期日期，空 = 永久
+	Reason     string     `json:"reason"`      // 申请理由
 }
 
 // TempPermissionExecutor 临时权限申请执行器
@@ -69,14 +70,15 @@ func (e *TempPermissionExecutor) Validate(data json.RawMessage) error {
 		return fmt.Errorf("无效的权限标识: %s", appData.Permission)
 	}
 
-	if appData.ExpiryDate.Before(time.Now()) {
-		return fmt.Errorf("到期日期不能早于当前时间")
-	}
-
-	// 最大期限限制（例如90天）
-	maxExpiry := time.Now().AddDate(0, 3, 0)
-	if appData.ExpiryDate.After(maxExpiry) {
-		return fmt.Errorf("授权期限不能超过90天")
+	// 到期日期：空表示永久；非空需在当前时间之后，且不超过 90 天
+	if appData.ExpiryDate != nil {
+		if appData.ExpiryDate.Before(time.Now()) {
+			return fmt.Errorf("到期日期不能早于当前时间")
+		}
+		maxExpiry := time.Now().AddDate(0, 3, 0)
+		if appData.ExpiryDate.After(maxExpiry) {
+			return fmt.Errorf("授权期限不能超过90天")
+		}
 	}
 
 	return nil
@@ -95,14 +97,19 @@ func (e *TempPermissionExecutor) OnApproved(ctx context.Context, app *model.Appl
 		return fmt.Errorf("解析申请数据失败: %v", err)
 	}
 
+	// 资源范围按申请人身份与权限语义推导：部门级权限限定在申请人所在部门，全局权限为 all
+	resourceType, resourceID := auth.GrantResourceScope(model.Permission(data.Permission), app.Department)
+
 	// 创建临时权限记录
 	tempPerm := &model.UserPermissionTemp{
-		UserID:     app.ApplicantID,
-		Permission: model.Permission(data.Permission),
-		GrantedBy:  approval.ApproverID,
-		CreatedAt:  time.Now(),
-		ExpiresAt:  &data.ExpiryDate,
-		IsActive:   true,
+		UserID:       app.ApplicantID,
+		Permission:   model.Permission(data.Permission),
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		GrantedBy:    approval.ApproverID,
+		CreatedAt:    time.Now(),
+		ExpiresAt:    data.ExpiryDate,
+		IsActive:     true,
 	}
 
 	if err := e.tempPermissionDao.Create(tempPerm); err != nil {

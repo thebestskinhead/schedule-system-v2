@@ -71,6 +71,22 @@ var permissionHierarchy = map[Permission][]Permission{
 	},
 }
 
+// deptScopedGrantPermissions 授出时需限定到被授权人所在部门的权限。
+// 其余可授权限（排班/用户管理的全局项）资源范围为 all。
+var deptScopedGrantPermissions = map[Permission]bool{
+	PermScheduleManageDept: true,
+	PermUserManageDept:     true,
+}
+
+// GrantResourceScope 计算授予指定权限时应落库的资源范围。
+// 部门级权限限定在被授权人所在部门；全局权限为 all。
+func GrantResourceScope(perm Permission, targetDepartment string) (string, int) {
+	if deptScopedGrantPermissions[perm] {
+		return "dept", model.DepartmentID(targetDepartment)
+	}
+	return "all", 0
+}
+
 // permImplies 判断 granted 权限是否隐含 required 权限（含权限组传递展开）
 func permImplies(granted, required Permission) bool {
 	if granted == required {
