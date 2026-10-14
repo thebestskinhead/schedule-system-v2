@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"schedule-system-v2/backend/internal/config"
@@ -68,6 +69,10 @@ func (s *InvitationService) CreateMember(req *model.MemberCreateRequest, operato
 		DeptRole:   req.DeptRole,
 	}
 	if err := s.userDAO.CreatePending(user); err != nil {
+		// 并发下「先查后插」可能被同批/跨请求穿透，靠唯一键兜底并转成友好提示
+		if db.IsDuplicateEntry(err) {
+			return nil, errors.New("学号或邮箱已被占用")
+		}
 		return nil, fmt.Errorf("创建用户失败: %v", err)
 	}
 
@@ -78,30 +83,117 @@ func (s *InvitationService) CreateMember(req *model.MemberCreateRequest, operato
 	return user, nil
 }
 
-// BatchCreateMembers 批量录入：逐条校验并汇总成功/失败。邮件失败不影响录入结果，仅记日志。
+// BatchCreateMembers 批量录入：并发逐条校验并汇总成功/失败。邮件异步入队，不影响录入结果。
 func (s *InvitationService) BatchCreateMembers(items []model.MemberCreateRequest, operatorID int) *model.BatchMemberResult {
 	result := &model.BatchMemberResult{
 		Success: []model.BatchMemberItemResult{},
 		Failed:  []model.BatchMemberItemFailed{},
 	}
+	if len(items) == 0 {
+		return result
+	}
 
-	for _, item := range items {
-		user, err := s.CreateMember(&item, operatorID)
-		if err != nil {
+	// 批内预去重：同一批次内学号/邮箱重复的条目，保留首次出现，其余直接判失败。
+	// 避免并发下多条同时通过「先查后插」校验而互相穿透。
+	seen := make([]bool, len(items))
+	seenStudentID := make(map[string]int)
+	seenEmail := make(map[string]int)
+	for i, item := range items {
+		if prev, ok := seenStudentID[item.StudentID]; ok {
+			seen[i] = true
 			result.Failed = append(result.Failed, model.BatchMemberItemFailed{
 				StudentID: item.StudentID,
 				Name:      item.Name,
 				Email:     item.Email,
-				Reason:    err.Error(),
+				Reason:    fmt.Sprintf("与本批次第 %d 条学号重复", prev+1),
 			})
 			continue
 		}
-		result.Success = append(result.Success, model.BatchMemberItemResult{
-			StudentID: user.StudentID,
-			Name:      user.Name,
-			Email:     user.Email,
-		})
+		if prev, ok := seenEmail[item.Email]; ok {
+			seen[i] = true
+			result.Failed = append(result.Failed, model.BatchMemberItemFailed{
+				StudentID: item.StudentID,
+				Name:      item.Name,
+				Email:     item.Email,
+				Reason:    fmt.Sprintf("与本批次第 %d 条邮箱重复", prev+1),
+			})
+			continue
+		}
+		seenStudentID[item.StudentID] = i
+		seenEmail[item.Email] = i
 	}
+
+	// 收集待并发处理的条目下标
+	pending := make([]int, 0, len(items))
+	for i := range items {
+		if !seen[i] {
+			pending = append(pending, i)
+		}
+	}
+
+	// 并发度：最多 8，避免过度冲击数据库
+	concurrency := 8
+	if len(pending) < concurrency {
+		concurrency = len(pending)
+	}
+
+	if concurrency > 0 {
+		type outcome struct {
+			idx  int
+			user *model.User
+			item model.MemberCreateRequest
+			err  error
+		}
+		jobs := make(chan int)
+		results := make(chan outcome, len(pending))
+
+		var wg sync.WaitGroup
+		for w := 0; w < concurrency; w++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for idx := range jobs {
+					item := items[idx]
+					user, err := s.CreateMember(&item, operatorID)
+					results <- outcome{idx: idx, user: user, item: item, err: err}
+				}
+			}()
+		}
+
+		go func() {
+			for _, idx := range pending {
+				jobs <- idx
+			}
+			close(jobs)
+		}()
+
+		wg.Wait()
+		close(results)
+
+		// 按输入顺序汇总，保证结果稳定可读
+		collected := make([]outcome, len(items))
+		for o := range results {
+			collected[o.idx] = o
+		}
+		for _, idx := range pending {
+			o := collected[idx]
+			if o.err != nil {
+				result.Failed = append(result.Failed, model.BatchMemberItemFailed{
+					StudentID: o.item.StudentID,
+					Name:      o.item.Name,
+					Email:     o.item.Email,
+					Reason:    o.err.Error(),
+				})
+				continue
+			}
+			result.Success = append(result.Success, model.BatchMemberItemResult{
+				StudentID: o.user.StudentID,
+				Name:      o.user.Name,
+				Email:     o.user.Email,
+			})
+		}
+	}
+
 	return result
 }
 
@@ -134,7 +226,7 @@ func (s *InvitationService) validateAndDedup(req *model.MemberCreateRequest) err
 	return nil
 }
 
-// createInvitationAndSend 生成令牌、写库、发邮件（邮件失败返回 error 但不回滚录入）
+// createInvitationAndSend 生成令牌、写库、投递激活邮件（邮件异步入队，不影响录入）
 func (s *InvitationService) createInvitationAndSend(user *model.User, operatorID int) error {
 	rawToken, err := generateInviteToken()
 	if err != nil {
@@ -154,23 +246,20 @@ func (s *InvitationService) createInvitationAndSend(user *model.User, operatorID
 		return fmt.Errorf("创建邀请记录失败: %v", err)
 	}
 
-	// 发送激活邮件（非阻塞录入）
-	if err := s.sendActivationEmail(user, rawToken); err != nil {
-		// 仅记日志，不影响录入成功
-		fmt.Printf("[WARN] 发送激活邮件失败 student_id=%s email=%s err=%v\n", user.StudentID, user.Email, err)
-	}
+	// 投递激活邮件（异步，立即返回）
+	s.sendActivationEmail(user, rawToken)
 	return nil
 }
 
-// sendActivationEmail 构造激活链接并发送邀请邮件
-func (s *InvitationService) sendActivationEmail(user *model.User, rawToken string) error {
+// sendActivationEmail 构造激活链接并投递邀请邮件（异步）
+func (s *InvitationService) sendActivationEmail(user *model.User, rawToken string) {
 	cfg := config.GetConfig()
 	domain := cfg.Site.Domain
 	if domain == "" {
 		domain = "http://localhost:8080"
 	}
 	activateURL := fmt.Sprintf("%s/invitations/activate?token=%s", domain, rawToken)
-	return s.smtpService.SendInvitationEmail(user.Email, user.Name, activateURL)
+	s.smtpService.SendInvitationEmail(user.Email, user.Name, activateURL)
 }
 
 // ResendInvite 重发邀请：重置令牌与过期时间并重新发送邮件（仅 pending/expired/revoked 可重发）
@@ -196,9 +285,7 @@ func (s *InvitationService) ResendInvite(id int, operatorID int) error {
 
 	// 读取最新用户（pending）用于邮件称呼
 	user := &model.User{StudentID: inv.StudentID, Name: inv.Name, Email: inv.Email}
-	if err := s.sendActivationEmail(user, rawToken); err != nil {
-		fmt.Printf("[WARN] 重发激活邮件失败 invitation_id=%d email=%s err=%v\n", id, inv.Email, err)
-	}
+	s.sendActivationEmail(user, rawToken)
 	return nil
 }
 

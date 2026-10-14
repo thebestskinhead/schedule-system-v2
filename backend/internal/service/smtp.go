@@ -169,13 +169,15 @@ func (s *SMTPService) ResetPassword(token string, newPassword string) error {
 	return s.smtpDAO.MarkTokenUsed(t.ID)
 }
 
-// SendInvitationEmail 发送「录入正式成员」激活邀请邮件
+// SendInvitationEmail 异步发送「录入正式成员」激活邀请邮件：渲染后入队，立即返回。
 func (s *SMTPService) SendInvitationEmail(email, name, activateURL string) error {
-	smtpConfig, err := s.smtpDAO.GetConfig()
-	if err != nil {
-		return fmt.Errorf("邮件服务未配置: %v", err)
-	}
+	subject, body := renderInvitationEmail(name, activateURL)
+	GetMailQueue().Enqueue(&MailJob{To: email, Subject: subject, Body: body})
+	return nil
+}
 
+// renderInvitationEmail 渲染激活邀请邮件内容（标题 + HTML 正文）
+func renderInvitationEmail(name, activateURL string) (string, string) {
 	subject := "账号激活邀请 - 排班系统"
 	body := fmt.Sprintf(`
 <h2>欢迎加入排班系统</h2>
@@ -188,8 +190,7 @@ func (s *SMTPService) SendInvitationEmail(email, name, activateURL string) error
 <br>
 <p>排班系统</p>
 `, name, activateURL, activateURL)
-
-	return s.sendEmail(smtpConfig, email, subject, body)
+	return subject, body
 }
 
 // sendEmail 发送邮件（内部方法）
