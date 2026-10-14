@@ -68,8 +68,9 @@ func (s *UserService) GetUserByID(id int) (*model.User, error) {
 	return s.userDAO.GetByID(id)
 }
 
-func (s *UserService) GetUserList() ([]model.User, error) {
-	return s.userDAO.List("")
+// GetUserList 获取用户列表。employmentStatus 为空表示不过滤，返回全部任职状态。
+func (s *UserService) GetUserList(employmentStatus string) ([]model.User, error) {
+	return s.userDAO.List(employmentStatus)
 }
 
 func (s *UserService) UpdateUser(userID int, req *model.UpdateUserRequest) error {
@@ -98,8 +99,8 @@ func (s *UserService) DeleteUser(id, adminID int) error {
 }
 
 // GetUserListByDepartment 按部门获取用户列表
-func (s *UserService) GetUserListByDepartment(dept string) ([]model.User, error) {
-	return s.userDAO.ListByDepartment(dept, "")
+func (s *UserService) GetUserListByDepartment(dept, employmentStatus string) ([]model.User, error) {
+	return s.userDAO.ListByDepartment(dept, employmentStatus)
 }
 
 // GetUsersByDepts 按多个部门获取用户
@@ -214,7 +215,7 @@ func (s *UserService) AdminUpdateUser(targetUserID int, req *model.AdminUpdateUs
 // AdminDeleteUser 管理员删除用户（实际为禁用用户）
 //
 // 设计说明：
-// 本系统采用"软删除"策略，即通过设置 is_active = 0 来标记用户为禁用状态，而非物理删除。
+// 本系统采用"软删除"策略，即通过设置 employment_status = 'resigned' 来标记用户为离职/禁用状态，而非物理删除。
 // 原因如下：
 // 1. 数据完整性：用户可能关联历史值班记录、审批记录等，删除用户会导致这些记录失去关联
 // 2. 审计追溯：需要保留"谁值的班"、"谁排的班"、"谁审批的"等操作历史

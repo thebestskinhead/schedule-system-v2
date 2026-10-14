@@ -51,13 +51,14 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 	}
 
 	utils.Success(c, model.UserInfo{
-		ID:         user.ID,
-		StudentID:  user.StudentID,
-		Name:       user.Name,
-		Email:      user.Email,
-		Role:       user.Role,
-		Department: user.Department,
-		DeptRole:   user.DeptRole,
+		ID:               user.ID,
+		StudentID:        user.StudentID,
+		Name:             user.Name,
+		Email:            user.Email,
+		Role:             user.Role,
+		Department:       user.Department,
+		DeptRole:         user.DeptRole,
+		EmploymentStatus: user.EmploymentStatus,
 	})
 }
 
@@ -71,11 +72,18 @@ func (h *UserHandler) GetUserList(c *gin.Context) {
 		return
 	}
 
+	// 任职状态筛选：空 / all 表示不过滤（返回全部状态）
+	status, ok := normalizeEmploymentStatus(c.Query("status"))
+	if !ok {
+		utils.Error(c, 400, "status 取值非法，允许 pending/active/resigned")
+		return
+	}
+
 	var users []model.User
 	var err error
 
 	if hasManageAll {
-		users, err = h.service.GetUserList()
+		users, err = h.service.GetUserList(status)
 	} else {
 		// 部门管理员只能查看本部门用户
 		dept := checker.GetDepartment()
@@ -83,7 +91,7 @@ func (h *UserHandler) GetUserList(c *gin.Context) {
 			utils.Error(c, 400, "未分配部门")
 			return
 		}
-		users, err = h.service.GetUserListByDepartment(dept)
+		users, err = h.service.GetUserListByDepartment(dept, status)
 	}
 
 	if err != nil {
@@ -94,16 +102,30 @@ func (h *UserHandler) GetUserList(c *gin.Context) {
 	var result []model.UserInfo
 	for _, user := range users {
 		result = append(result, model.UserInfo{
-			ID:         user.ID,
-			StudentID:  user.StudentID,
-			Name:       user.Name,
-			Email:      user.Email,
-			Role:       user.Role,
-			Department: user.Department,
-			DeptRole:   user.DeptRole,
+			ID:               user.ID,
+			StudentID:        user.StudentID,
+			Name:             user.Name,
+			Email:            user.Email,
+			Role:             user.Role,
+			Department:       user.Department,
+			DeptRole:         user.DeptRole,
+			EmploymentStatus: user.EmploymentStatus,
 		})
 	}
 	utils.Success(c, result)
+}
+
+// normalizeEmploymentStatus 解析任职状态筛选参数。
+// 空字符串与 "all" 视为不过滤（返回空串）；其余仅接受三态取值。第二个返回值表示取值是否合法。
+func normalizeEmploymentStatus(raw string) (string, bool) {
+	switch raw {
+	case "", "all":
+		return "", true
+	case model.EmploymentStatusPending, model.EmploymentStatusActive, model.EmploymentStatusResigned:
+		return raw, true
+	default:
+		return "", false
+	}
 }
 
 func (h *UserHandler) UpdateProfile(c *gin.Context) {
@@ -210,7 +232,14 @@ func (h *UserHandler) GetUserListByDepartment(c *gin.Context) {
 		return
 	}
 
-	users, err := h.service.GetUserListByDepartment(dept)
+	// 任职状态筛选：空 / all 表示不过滤（返回全部状态）
+	status, ok := normalizeEmploymentStatus(c.Query("status"))
+	if !ok {
+		utils.Error(c, 400, "status 取值非法，允许 pending/active/resigned")
+		return
+	}
+
+	users, err := h.service.GetUserListByDepartment(dept, status)
 	if err != nil {
 		utils.Error(c, 500, "获取用户列表失败")
 		return
@@ -219,13 +248,14 @@ func (h *UserHandler) GetUserListByDepartment(c *gin.Context) {
 	var result []model.UserInfo
 	for _, user := range users {
 		result = append(result, model.UserInfo{
-			ID:         user.ID,
-			StudentID:  user.StudentID,
-			Name:       user.Name,
-			Email:      user.Email,
-			Role:       user.Role,
-			Department: user.Department,
-			DeptRole:   user.DeptRole,
+			ID:               user.ID,
+			StudentID:        user.StudentID,
+			Name:             user.Name,
+			Email:            user.Email,
+			Role:             user.Role,
+			Department:       user.Department,
+			DeptRole:         user.DeptRole,
+			EmploymentStatus: user.EmploymentStatus,
 		})
 	}
 	utils.Success(c, result)
@@ -236,9 +266,9 @@ func (h *UserHandler) GetUserListByDepartment(c *gin.Context) {
 func (h *UserHandler) GetUsersForSchedule(c *gin.Context) {
 	checker := auth.GetChecker(c)
 
-	// 拥有全局排班查看权限：返回所有用户（排除部门管理员）
+	// 拥有全局排班查看权限：返回所有在职用户（排除部门管理员）
 	if checker.HasPermission(auth.PermScheduleViewAll) {
-		users, err := h.service.GetUserList()
+		users, err := h.service.GetUserList(model.EmploymentStatusActive)
 		if err != nil {
 			utils.Error(c, 500, "获取用户列表失败")
 			return
@@ -268,7 +298,7 @@ func (h *UserHandler) GetUsersForSchedule(c *gin.Context) {
 		return
 	}
 
-	users, err := h.service.GetUserListByDepartment(dept)
+	users, err := h.service.GetUserListByDepartment(dept, model.EmploymentStatusActive)
 	if err != nil {
 		utils.Error(c, 500, "获取用户列表失败")
 		return
@@ -435,13 +465,14 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 	}
 
 	utils.Success(c, model.UserInfo{
-		ID:         user.ID,
-		StudentID:  user.StudentID,
-		Name:       user.Name,
-		Email:      user.Email,
-		Role:       user.Role,
-		Department: user.Department,
-		DeptRole:   user.DeptRole,
+		ID:               user.ID,
+		StudentID:        user.StudentID,
+		Name:             user.Name,
+		Email:            user.Email,
+		Role:             user.Role,
+		Department:       user.Department,
+		DeptRole:         user.DeptRole,
+		EmploymentStatus: user.EmploymentStatus,
 	})
 }
 
