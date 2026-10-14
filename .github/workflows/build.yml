@@ -1,0 +1,128 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [main, dev]
+    tags: ['v*.*.*']
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: '1.24'
+  NODE_VERSION: '20'
+  PROJECT_NAME: schedule-system-v2
+
+jobs:
+  # ------------------------------------------------------------------
+  # 构建：产出 Linux 全量包与 Windows 单端包
+  # ------------------------------------------------------------------
+  build:
+    name: Build artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            frontend-v2/package-lock.json
+            frontend-mobile/package-lock.json
+
+      - name: Backend tests
+        working-directory: backend
+        run: go test ./... -count=1
+
+      - name: Build desktop frontend
+        working-directory: frontend-v2
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build mobile frontend
+        working-directory: frontend-mobile
+        run: |
+          npm ci
+          npm run build
+
+      # ---------- Linux 全量包 ----------
+      - name: Build Linux binary
+        working-directory: backend
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o ../release-linux/server ./cmd/server/main.go
+
+      - name: Assemble Linux package
+        run: |
+          chmod +x .github/scripts/package.sh
+          TARGET=linux bash .github/scripts/package.sh
+
+      - name: Archive Linux package
+        run: |
+          tar -czf "${PROJECT_NAME}-linux-amd64.tar.gz" -C release-linux .
+          ls -lh "${PROJECT_NAME}-linux-amd64.tar.gz"
+
+      # ---------- Windows 单端包 ----------
+      - name: Build Windows binary
+        working-directory: backend
+        run: CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o ../release-windows/server.exe ./cmd/server/main.go
+
+      - name: Assemble Windows package
+        run: |
+          chmod +x .github/scripts/package.sh
+          TARGET=windows bash .github/scripts/package.sh
+
+      - name: Archive Windows package
+        run: |
+          cd release-windows && zip -r "../${PROJECT_NAME}-windows-amd64.zip" .
+          cd .. && ls -lh "${PROJECT_NAME}-windows-amd64.zip"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PROJECT_NAME }}-${{ github.sha }}
+          path: |
+            ${{ env.PROJECT_NAME }}-linux-amd64.tar.gz
+            ${{ env.PROJECT_NAME }}-windows-amd64.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  # ------------------------------------------------------------------
+  # 发布：仅在 v*.*.* 标签推送时，把产物挂到 GitHub Release
+  # ------------------------------------------------------------------
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.PROJECT_NAME }}-${{ github.sha }}
+          path: dist-artifacts
+
+      - name: List artifacts
+        run: ls -lh dist-artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist-artifacts/${{ env.PROJECT_NAME }}-linux-amd64.tar.gz
+            dist-artifacts/${{ env.PROJECT_NAME }}-windows-amd64.zip
+          fail_on_unmatched_files: true

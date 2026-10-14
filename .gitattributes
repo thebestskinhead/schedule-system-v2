@@ -1,0 +1,8 @@
+# 统一行尾：脚本与 CI 配置强制 LF，避免在 Linux 环境出现 CRLF 解析错误
+*.sh          text eol=lf
+*.yml         text eol=lf
+*.yaml        text eol=lf
+*.sql         text eol=lf
+*.go          text eol=lf
+*.bat         text eol=crlf
+*.ps1         text eol=crlf
