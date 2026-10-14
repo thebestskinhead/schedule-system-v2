@@ -223,41 +223,7 @@ POST /password/reset
 
 ## 三、用户认证（公开）
 
-### 1. 用户注册
-
-```http
-POST /user/register
-```
-
-**请求参数:**
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| student_id | string | 是 | 学号 |
-| name | string | 是 | 姓名 |
-| email | string | 是 | 邮箱 |
-| password | string | 是 | 密码(最少6位) |
-| department | string | 是 | 部门 |
-
-**响应示例:**
-
-```json
-{
-  "code": 200,
-  "message": "注册成功",
-  "data": {
-    "id": 1,
-    "student_id": "2024001",
-    "name": "张三",
-    "email": "zhangsan@example.com",
-    "department": "竞赛部",
-    "role": "user",
-    "dept_role": "dept_member"
-  }
-}
-```
-
-### 2. 用户登录
+### 1. 用户登录
 
 ```http
 POST /user/login
@@ -289,6 +255,37 @@ POST /user/login
       "role": "user"
     }
   }
+}
+```
+
+**说明:**
+
+- 仅 `employment_status = active`（在职）账号可登录。
+- 待激活账号（`pending`）登录被拒，返回 `code: 401`，message：「账号待激活，请查收激活邮件完成激活后再登录」。
+- 已离职账号（`resigned`）登录被拒，返回 `code: 401`，message：「该账号已离职，无法登录」。
+
+### 2. 邀请激活（自助）
+
+```http
+POST /invitations/activate
+```
+
+受邀人收到激活邮件后，通过邮件链接携带 token 自助设置登录密码完成账号激活。
+
+**请求参数:**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| token | string | 是 | 邀请令牌（邮件激活链接中的 token） |
+| password | string | 是 | 登录密码(最少6位) |
+
+**响应示例:**
+
+```json
+{
+  "code": 200,
+  "message": "账号激活成功，请使用学号登录",
+  "data": null
 }
 ```
 
@@ -363,6 +360,7 @@ GET /user/profile
     "email": "zhangsan@example.com",
     "department": "办公室",
     "dept_role": "dept_admin",
+    "employment_status": "active",
     "role": "user"
   }
 }
@@ -827,6 +825,12 @@ Authorization: Bearer <token>
 
 **权限要求:** `user:manage` 或 `user:manage:dept`
 
+**查询参数:**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| status | string | 否 | 任职状态筛选：`pending`（待入职）/ `active`（在职）/ `resigned`（离职）；缺省或 `all` 表示全部状态；非法值返回 code 400 |
+
 **响应示例:**
 
 ```json
@@ -840,6 +844,7 @@ Authorization: Bearer <token>
       "email": "zhangsan@example.com",
       "department": "办公室",
       "dept_role": "dept_admin",
+      "employment_status": "active",
       "role": "user"
     }
   ]
@@ -854,6 +859,13 @@ Authorization: Bearer <token>
 ```
 
 **权限要求:** `user:manage:dept`
+
+**查询参数:**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| department | string | 是 | 部门名称 |
+| status | string | 否 | 任职状态筛选：`pending`/`active`/`resigned`；缺省或 `all` 表示全部状态；非法值返回 code 400 |
 
 ### 3. 多条件筛选用户
 
@@ -934,6 +946,8 @@ Authorization: Bearer <token>
 
 **权限要求:** `user:manage` 或 `user:manage:dept`
 
+> **说明:** 该接口并非物理删除，而是将用户标记为离职（`employment_status = resigned`），并联动取消其待处理排班、失效其临时权限；历史值班与审批记录予以保留。
+
 ### 7. 设置用户系统角色
 
 ```http
@@ -978,6 +992,206 @@ Authorization: Bearer <token>
 | dept_role | string | 是 | 部门角色: `dept_admin` 或 `dept_member` |
 
 **权限要求:** `user:manage`（handler内还要求系统管理员或办公室管理员）
+
+### 10. 录入正式成员（单个）
+
+```http
+POST /admin/members
+Authorization: Bearer <token>
+```
+
+管理员录入正式成员：创建 `pending`（待入职）账号并生成激活令牌、发送激活邮件，受邀人通过邮件链接自助激活后转为 `active`。
+
+**请求参数:**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| name | string | 是 | 姓名 |
+| student_id | string | 是 | 学号 |
+| department | string | 是 | 部门 |
+| dept_role | string | 是 | 部门角色: `dept_admin` 或 `dept_member` |
+| email | string | 是 | 邮箱 |
+
+**权限要求:** `user:manage`
+
+**响应示例:**
+
+```json
+{
+  "code": 200,
+  "data": {
+    "id": 2,
+    "student_id": "2024002",
+    "name": "李四",
+    "email": "lisi@example.com",
+    "department": "竞赛部",
+    "dept_role": "dept_member",
+    "employment_status": "pending"
+  }
+}
+```
+
+### 11. 批量录入正式成员
+
+```http
+POST /admin/members/batch
+Authorization: Bearer <token>
+```
+
+**请求参数:**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| items | array | 是 | 成员列表，元素结构同「录入正式成员（单个）」，至少 1 条 |
+
+**权限要求:** `user:manage`
+
+**响应示例:**
+
+```json
+{
+  "code": 200,
+  "data": {
+    "success": [
+      { "student_id": "2024002", "name": "李四", "email": "lisi@example.com" }
+    ],
+    "failed": [
+      { "student_id": "2024003", "name": "王五", "email": "wangwu@example.com", "reason": "学号 2024003 已被占用" }
+    ]
+  }
+}
+```
+
+### 12. 重发邀请
+
+```http
+POST /admin/members/:id/resend-invite
+Authorization: Bearer <token>
+```
+
+**路径参数:** `id` - 待激活/过期/作废的邀请记录ID
+
+**权限要求:** `user:manage`
+
+**响应示例:**
+
+```json
+{
+  "code": 200,
+  "message": "邀请已重新发送",
+  "data": null
+}
+```
+
+### 13. 作废邀请
+
+```http
+POST /admin/members/:id/revoke
+Authorization: Bearer <token>
+```
+
+**路径参数:** `id` - 待处理/过期的邀请记录ID
+
+**权限要求:** `user:manage`
+
+**响应示例:**
+
+```json
+{
+  "code": 200,
+  "message": "邀请已作废",
+  "data": null
+}
+```
+
+### 14. 单个离职
+
+```http
+POST /admin/members/:id/resign
+Authorization: Bearer <token>
+```
+
+将指定用户标记为离职（`employment_status = resigned`），并联动取消其待处理排班、失效临时权限。不可离职自己或系统管理员。
+
+**路径参数:** `id` - 用户ID
+
+**权限要求:** `user:manage`
+
+**响应示例:**
+
+```json
+{
+  "code": 200,
+  "message": "该用户已标记为离职",
+  "data": null
+}
+```
+
+### 15. 批量离职预览（只读）
+
+```http
+POST /admin/members/batch-resign/preview
+Authorization: Bearer <token>
+```
+
+预览批量离职将受影响的清单，不改变数据；仅处理 `active`（在职）用户，`exclude_ids` 中的ID不参与。
+
+**请求参数:**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| user_ids | []int | 否 | 候选用户ID列表 |
+| exclude_ids | []int | 否 | 需排除的用户ID列表 |
+
+**权限要求:** `user:manage`
+
+**响应示例:**
+
+```json
+{
+  "code": 200,
+  "data": {
+    "affected_user_count": 3,
+    "pending_duty_count": 5,
+    "active_temp_perm_count": 1,
+    "affected_users": [
+      { "id": 2, "name": "李四", "department": "竞赛部", "employment_status": "active" }
+    ]
+  }
+}
+```
+
+### 16. 批量离职执行
+
+```http
+POST /admin/members/batch-resign
+Authorization: Bearer <token>
+```
+
+执行批量离职：将 `user_ids` 中在职且未被 `exclude_ids` 排除的用户标记为离职。不可将操作者自身纳入。
+
+**请求参数:**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| user_ids | []int | 否 | 候选用户ID列表 |
+| exclude_ids | []int | 否 | 需排除的用户ID列表 |
+
+**权限要求:** `user:manage`
+
+**响应示例:**
+
+```json
+{
+  "code": 200,
+  "data": {
+    "affected_user_count": 3,
+    "affected_user_ids": [2, 3, 4],
+    "operator_id": 1,
+    "executed_at": "2026-03-29T10:00:00Z"
+  }
+}
+```
 
 ---
 
@@ -1718,14 +1932,17 @@ Authorization: Bearer <token>
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| type | string | 是 | 申请类型: `temp_permission` |
-| data | object | 是 | 申请数据 |
-| data.permission | string | 是 | 申请的权限代码 |
-| data.expiry_date | datetime | 是 | 期望到期时间 |
-| data.reason | string | 是 | 申请原因 |
+| type | string | 是 | 申请类型: `temp_permission`(权限申请) / `leave`(请假申请) |
+| data | object | 是 | 申请数据（字段随 type 而定，见下） |
+| data.permission | string | 条件 | type=`temp_permission` 必填：申请的权限代码 |
+| data.expiry_date | datetime | 条件 | type=`temp_permission` 必填：期望到期时间 |
+| data.leave_type | string | 条件 | type=`leave` 必填：请假类型 `sick`(病假)/`personal`(事假)/`annual`(年假) |
+| data.start_date | date | 条件 | type=`leave` 必填：开始日期(YYYY-MM-DD) |
+| data.end_date | date | 条件 | type=`leave` 必填：结束日期(YYYY-MM-DD) |
+| data.reason | string | 条件 | 申请原因（type=`temp_permission` 或 `leave` 时必填） |
 | reason | string | 否 | 申请说明 |
 
-**请求示例:**
+**请求示例（权限申请）:**
 
 ```json
 {
@@ -1736,6 +1953,21 @@ Authorization: Bearer <token>
     "reason": "因部门活动需要临时管理权限"
   },
   "reason": "申请临时排班管理权限"
+}
+```
+
+**请求示例（请假申请）:**
+
+```json
+{
+  "type": "leave",
+  "data": {
+    "leave_type": "personal",
+    "start_date": "2026-04-01",
+    "end_date": "2026-04-03",
+    "reason": "家中有事需请假"
+  },
+  "reason": "申请事假"
 }
 ```
 

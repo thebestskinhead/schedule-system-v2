@@ -150,11 +150,10 @@ func AuthMiddleware() gin.HandlerFunc {
 		}
 
 		// 验签通过后，从数据库重载用户最新状态，而非信任 JWT 中的角色快照。
-		// 这样权限变更（降权/调岗）即时生效，禁用账号（is_active=0）即时失效；
-		// GetByID 已过滤 is_active=1，被禁用或已删除的用户在此被拒绝。
+		// 这样权限变更（降权/调岗）与账号状态变更（离职/待入职）即时生效。
 		user, err := dao.NewUserDAO().GetByID(claims.UserID)
 		if err != nil || user == nil {
-			c.JSON(http.StatusUnauthorized, model.Response{Code: 401, Message: "用户不存在或已被禁用"})
+			c.JSON(http.StatusUnauthorized, model.Response{Code: 401, Message: "用户不存在或账号状态异常"})
 			c.Abort()
 			return
 		}
@@ -162,7 +161,7 @@ func AuthMiddleware() gin.HandlerFunc {
 		// 三态账号状态断言：仅 employment_status='active' 可继续。
 		// 确保离职/降权即时生效——即使 JWT 仍有效，状态变更后下次请求即被拦截。
 		if user.EmploymentStatus != model.EmploymentStatusActive {
-			c.JSON(http.StatusUnauthorized, model.Response{Code: 401, Message: "用户不存在或已被禁用"})
+			c.JSON(http.StatusUnauthorized, model.Response{Code: 401, Message: "用户不存在或账号状态异常"})
 			c.Abort()
 			return
 		}

@@ -61,22 +61,28 @@ schedule-system-v2/
 | 表名 | 用途 | 关键字段 |
 |------|------|---------|
 | `system_config` | 系统配置 | config_key, config_value |
-| `users` | 用户 | student_id, name, email, password, role(admin/user), department, dept_role(dept_admin/dept_member) |
+| `users` | 用户 | student_id, name, email, password, role(admin/user), department, dept_role(dept_admin/dept_member), employment_status(pending/active/resigned), duty_count |
 | `availability` | 无课时间 | user_id, week(1-30), weekday(1-5), period(1-4) |
-| `duty_records` | 值班记录 | week, weekday, period, user_id, status(pending/confirmed/completed/cancelled) |
-| `duty_counters` | 值班统计 | user_id, total_count |
-| `schedule_settings` | 排班设置 | current_week, auto_increment, need_per_cell, max_per_day, max_per_week |
+| `duty_records` | 值班记录 | week, weekday, period, user_id, department, status(pending/confirmed/completed/cancelled) |
+| `schedule_settings` | 排班设置（单例，`config_key='global'`） | current_week, auto_increment, need_per_cell, max_per_day, max_per_week, semester_start_date |
 | `weekly_duty_assignments` | 每周分工 | week, department, weekday, is_assigned |
-| `user_permissions_temp` | 临时权限 | user_id, permission, resource_type, resource_id, expires_at |
-| `applications` | 权限申请 | applicant_id, type, status, data |
-| `smtp_configs` | SMTP配置 | host, port, username, password, from, use_tls, is_active |
-| `site_config` | 站点配置 | domain |
+| `user_permissions_temp` | 临时权限 | user_id, permission, resource_type, resource_id, expires_at(可空=永久) |
 | `export_templates` | 导出模板 | name, config, is_default |
-| `cookie_import_tasks` | Cookie导入任务 | user_id, status, result |
+| `smtp_config` | SMTP配置 | host, port, username, password, from_name, use_tls, is_active |
+| `password_reset_tokens` | 密码重置令牌 | user_id, email, token, expires_at, is_used |
+| `application_types` | 申请类型 | code, name, config |
+| `applications` | 申请单 | applicant_id, type_code, status, data, current_level |
+| `application_approvals` | 审批历史 | application_id, approver_id, action, level |
+| `application_approvers` | 审批人配置 | type_code, level, role_type |
+| `leave_requests` | 请假表 | application_id, user_id, leave_type, start_date, end_date, status |
+| `user_invitations` | 预注册待激活 | student_id, name, email, department, dept_role, token(SHA-256哈希), token_expires_at, status |
 
 ### 核心索引
-- `availability`: UNIQUE(user_id, week, weekday, period), INDEX(week, weekday, period, user_id)
-- `duty_records`: INDEX(week), INDEX(user_id), INDEX(week, weekday, period)
+- `availability`: UNIQUE(user_id, week, weekday, period)
+- `duty_records`: UNIQUE uk_duty_cell(week, weekday, period, user_id), INDEX idx_user_week(user_id, week)
+- `schedule_settings`: UNIQUE uk_config_key(config_key)
+- `user_invitations`: UNIQUE uk_token(token), UNIQUE uk_student_id(student_id)
+- `leave_requests`: UNIQUE uk_application(application_id)
 
 ---
 
@@ -138,7 +144,7 @@ schedule-system-v2/
 |------|------|------|
 | `/` | 首页/仪表盘 | 所有 |
 | `/login` | 登录 | 未登录 |
-| `/register` | 注册 | 未登录 |
+| `/invitations/activate` | 激活账号（邀请链接） | 未登录 |
 | `/init` | 系统初始化 | 未初始化 |
 | `/forgot-password` | 找回密码 | 未登录 |
 | `/reset-password` | 重置密码 | 未登录 |
@@ -174,7 +180,7 @@ schedule-system-v2/
 - 向导式安装：数据库连接 → 建表 → 创建管理员
 
 ### 2. 用户系统
-- 注册/登录 (JWT, 7天过期)
+- 登录 (JWT, 7天过期)
 - 4级角色 + 临时权限的混合权限模型
 - 部门体系：办公室、竞赛部、项目部、科普部
 
@@ -316,31 +322,15 @@ go run cmd/server/main.go
 
 ---
 
-## 用户状态语义说明（2026-08-12）
+## 用户状态语义
 
-> 设计变更记录：本说明仅记录语义约定，**本次不修改代码**，待后续迁移落地。
-
-### 背景
-
-此前「删除用户」实际是**软删除**（`users.is_active = 0`），
-与业务真实语义（人员离职）不符，属早期需求梳理不完整遗留的问题。
-
-### 变更：删除 → 离职，状态演进为三态
-
-- **不再有「删除用户」操作**，改为「标记离职」。
-- 用户状态由 `is_active` 二态（0/1 禁用）演进为**三态**：
+用户任职状态为 `users.employment_status` 三态：
 
 | 状态 | 含义 | 说明 |
 |---|---|---|
-| 待注册 pending | 已录入/扫码登录但未完成系统注册 | 对应 QR 登录未注册分支、用户邀请待激活 |
-| 在职 active | 正常在职 | 可登录、参与排班，默认状态 |
+| 待入职 pending | 已由管理员录入、尚未激活 | 不可登录；扫码登录提示联系管理员录入；经邀请邮件链接激活后转为在职 |
+| 在职 active | 正常在职 | 可登录、参与排班 |
 | 离职 resigned | 已离职 | 不可登录、不可参与排班，历史记录（值班/审批）保留 |
 
-### 过渡实现
-
-当前 `is_active = 0`（原「禁用/软删除」）即「离职」状态的过渡实现：
-登录、扫码登录、鉴权中间件均已按此拦截（本批次安全修复已验证）。
-后续迁移为 `employment_status` 三态字段时，`is_active=0 → resigned`、`is_active=1 → active`，
-并移除「删除用户」入口，改为「标记离职」。
-
-*说明记录时间: 2026-08-12*
+- 不存在「删除用户」操作：用户移除一律为「标记离职」，由存储过程 `sp_mark_user_resigned` / `sp_mark_users_resigned` 事务化处理，学号与邮箱长期保留、不可再次注册。
+- 登录、扫码登录、鉴权中间件均按上述状态拦截。
