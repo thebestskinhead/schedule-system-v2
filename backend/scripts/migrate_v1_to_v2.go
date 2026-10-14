@@ -260,7 +260,7 @@ func migrateUsers(db *sql.DB, users []V1User) error {
 
 	// 准备插入语句
 	stmt, err := db.Prepare(`
-		INSERT INTO users (id, student_id, name, email, password, role, department, dept_role, is_active, created_at, updated_at)
+		INSERT INTO users (id, student_id, name, email, password, role, department, dept_role, employment_status, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
@@ -287,6 +287,13 @@ func migrateUsers(db *sql.DB, users []V1User) error {
 			fmt.Printf("  添加用户 %s(%s) 为科普部成员\n", u.Name, u.StudentID)
 		}
 
+		// 三态回填：v1 的 is_active (TINYINT) 映射为 v2.1 的 employment_status
+		// is_active=1 -> 'active'（在职）；is_active=0 -> 'resigned'（离职）
+		empStatus := "active"
+		if u.IsActive == 0 {
+			empStatus = "resigned"
+		}
+
 		_, err := stmt.Exec(
 			u.ID,
 			u.StudentID,
@@ -296,7 +303,7 @@ func migrateUsers(db *sql.DB, users []V1User) error {
 			role,
 			"科普部", // 所有人均为科普部
 			deptRole,
-			u.IsActive,
+			empStatus,
 			u.CreatedAt,
 			u.UpdatedAt,
 		)

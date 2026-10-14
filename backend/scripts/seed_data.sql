@@ -4,7 +4,6 @@ USE schedule_system_v2;
 -- 清空现有数据（保留系统配置）
 DELETE FROM availability WHERE user_id > 0;
 DELETE FROM duty_records WHERE user_id > 0;
-DELETE FROM duty_counters WHERE user_id > 0;
 DELETE FROM weekly_duty_assignments WHERE id > 0;
 DELETE FROM user_permissions_temp WHERE id > 0;
 DELETE FROM users WHERE id > 0;
@@ -22,30 +21,32 @@ ALTER TABLE user_permissions_temp AUTO_INCREMENT = 1;
 -- ============================================
 
 -- 系统管理员
-INSERT INTO users (id, student_id, name, email, password, role, department, dept_role, is_active) VALUES
-(1, '2024001', '管理员', 'admin@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'admin', '办公室', 'dept_admin', 1);
+INSERT INTO users (id, student_id, name, email, password, role, department, dept_role, employment_status) VALUES
+(1, '2024001', '管理员', 'admin@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'admin', '办公室', 'dept_admin', 'active');
 
 -- 办公室用户 (资源ID=1)
-INSERT INTO users (student_id, name, email, password, role, department, dept_role, is_active) VALUES
-('2024101', '张三', 'zhangsan@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'user', '办公室', 'dept_member', 1),
-('2024102', '李四', 'lisi@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'user', '办公室', 'dept_admin', 1),
-('2024103', '王五', 'wangwu@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'user', '办公室', 'dept_member', 1);
+INSERT INTO users (student_id, name, email, password, role, department, dept_role, employment_status) VALUES
+('2024101', '张三', 'zhangsan@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'user', '办公室', 'dept_member', 'active'),
+('2024102', '李四', 'lisi@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'user', '办公室', 'dept_admin', 'active'),
+('2024103', '王五', 'wangwu@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'user', '办公室', 'dept_member', 'active');
 
 -- 竞赛部用户 (资源ID=2)
-INSERT INTO users (student_id, name, email, password, role, department, dept_role, is_active) VALUES
-('2024201', '赵六', 'zhaoliu@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'user', '竞赛部', 'dept_admin', 1),
-('2024202', '钱七', 'qianqi@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'user', '竞赛部', 'dept_member', 1),
-('2024203', '孙八', 'sunba@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'user', '竞赛部', 'dept_member', 1);
+INSERT INTO users (student_id, name, email, password, role, department, dept_role, employment_status) VALUES
+('2024201', '赵六', 'zhaoliu@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'user', '竞赛部', 'dept_admin', 'active'),
+('2024202', '钱七', 'qianqi@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'user', '竞赛部', 'dept_member', 'active'),
+('2024203', '孙八', 'sunba@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'user', '竞赛部', 'dept_member', 'active');
 
 -- 项目部用户 (资源ID=3)
-INSERT INTO users (student_id, name, email, password, role, department, dept_role, is_active) VALUES
-('2024301', '周九', 'zhoujiu@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'user', '项目部', 'dept_admin', 1),
-('2024302', '吴十', 'wushi@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'user', '项目部', 'dept_member', 1);
+INSERT INTO users (student_id, name, email, password, role, department, dept_role, employment_status) VALUES
+('2024301', '周九', 'zhoujiu@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'user', '项目部', 'dept_admin', 'active'),
+('2024302', '吴十', 'wushi@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'user', '项目部', 'dept_member', 'active');
 
 -- 科普部用户 (资源ID=4)
-INSERT INTO users (student_id, name, email, password, role, department, dept_role, is_active) VALUES
-('2024401', '郑十一', 'zheng11@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'user', '科普部', 'dept_admin', 1),
-('2024402', '陈十二', 'chen12@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'user', '科普部', 'dept_member', 1);
+INSERT INTO users (student_id, name, email, password, role, department, dept_role, employment_status) VALUES
+('2024401', '郑十一', 'zheng11@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'user', '科普部', 'dept_admin', 'active'),
+('2024402', '陈十二', 'chen12@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'user', '科普部', 'dept_member', 'active'),
+('2024501', '林十三', 'linshisan@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'user', '科普部', 'dept_member', 'active'),
+('2024502', '黄十四', 'huangshisi@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqQz3XJwK9XqZzZzZzZzZzZzZzZz', 'user', '科普部', 'dept_member', 'active');
 
 -- ============================================
 -- 2. 插入无课表数据
@@ -187,8 +188,8 @@ INSERT INTO availability (user_id, week, weekday, period) VALUES
 -- ============================================
 -- 3. 插入排班设置
 -- ============================================
-INSERT INTO schedule_settings (admin_id, need_per_cell, min_per_cell, max_per_day, max_per_week, export_title) VALUES
-(1, 2, 1, 1, 2, '第{week}周排班表');
+INSERT IGNORE INTO schedule_settings (config_key, admin_id, need_per_cell, min_per_cell, max_per_day, max_per_week, export_title) VALUES
+('global', 1, 2, 1, 1, 2, '第{week}周排班表');
 
 -- ============================================
 -- 4. 插入每周值班分工示例（第1周）
@@ -218,13 +219,7 @@ INSERT INTO duty_records (week, weekday, period, user_id, department, assigned_b
 (1, 2, 3, 6, '竞赛部', 1, 'confirmed'),  -- 钱七
 (1, 2, 4, 6, '竞赛部', 1, 'confirmed');  -- 钱七
 
--- ============================================
--- 6. 更新值班次数统计
--- ============================================
-INSERT INTO duty_counters (user_id, total_count) VALUES
-(2, 2),  -- 张三
-(3, 2),  -- 李四
-(6, 2);  -- 钱七
+-- 值班次数统计（duty_counters 已并入 users.duty_count，由触发器自动维护，无需此处写入）
 
 -- ============================================
 -- 完成

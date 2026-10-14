@@ -207,13 +207,13 @@ func (s *SystemService) executeInitSQL(database *sql.DB) error {
 		role ENUM('admin', 'user') DEFAULT 'user' COMMENT '系统角色',
 		department VARCHAR(50) DEFAULT '科普部' COMMENT '所属部门',
 		dept_role ENUM('dept_admin', 'dept_member') DEFAULT 'dept_member' COMMENT '部门角色',
-		is_active TINYINT DEFAULT 1 COMMENT '是否启用',
+		employment_status ENUM('pending','active','resigned') NOT NULL DEFAULT 'active' COMMENT '任职状态: 待入职/在职/离职(取代is_active)',
+		duty_count INT NOT NULL DEFAULT 0 COMMENT '值班次数(触发器维护, 排班算法读取)',
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 		INDEX idx_role (role),
 		INDEX idx_department (department),
-		INDEX idx_dept_role (dept_role),
-		INDEX idx_active (is_active)
+		INDEX idx_dept_role (dept_role)
 	) ENGINE=InnoDB COMMENT='用户表'`)
 	if err != nil {
 		return fmt.Errorf("创建users表失败: %v", err)
@@ -229,7 +229,10 @@ func (s *SystemService) executeInitSQL(database *sql.DB) error {
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE KEY uk_avail (user_id, week, weekday, period),
 		INDEX idx_time_user (week, weekday, period, user_id),
-		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+		CONSTRAINT chk_avail_week CHECK (week BETWEEN 1 AND 30),
+		CONSTRAINT chk_avail_weekday CHECK (weekday BETWEEN 1 AND 5),
+		CONSTRAINT chk_avail_period CHECK (period BETWEEN 1 AND 4)
 	) ENGINE=InnoDB COMMENT='无课时间表'`)
 	if err != nil {
 		return fmt.Errorf("创建availability表失败: %v", err)
@@ -252,8 +255,13 @@ func (s *SystemService) executeInitSQL(database *sql.DB) error {
 		INDEX idx_user (user_id),
 		INDEX idx_department (department),
 		INDEX idx_time (week, weekday, period),
+		UNIQUE KEY uk_duty_cell (week, weekday, period, user_id),
+		INDEX idx_user_week (user_id, week),
 		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-		FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL
+		FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL,
+		CONSTRAINT chk_duty_week CHECK (week BETWEEN 1 AND 30),
+		CONSTRAINT chk_duty_weekday CHECK (weekday BETWEEN 1 AND 5),
+		CONSTRAINT chk_duty_period CHECK (period BETWEEN 1 AND 4)
 	) ENGINE=InnoDB COMMENT='值班记录表'`)
 	if err != nil {
 		return fmt.Errorf("创建duty_records表失败: %v", err)
@@ -262,7 +270,8 @@ func (s *SystemService) executeInitSQL(database *sql.DB) error {
 	// 排班设置表
 	_, err = database.Exec(`CREATE TABLE IF NOT EXISTS schedule_settings (
 		id INT PRIMARY KEY AUTO_INCREMENT,
-		admin_id INT NOT NULL UNIQUE,
+		config_key VARCHAR(20) NOT NULL DEFAULT 'global' COMMENT '单例键',
+		admin_id INT DEFAULT 1 COMMENT '最后修改者ID',
 		current_week INT DEFAULT 1 COMMENT '当前周次',
 		auto_increment TINYINT(1) DEFAULT 0 COMMENT '是否自动递增周次',
 		need_per_cell INT DEFAULT 2,
@@ -272,10 +281,19 @@ func (s *SystemService) executeInitSQL(database *sql.DB) error {
 		export_title VARCHAR(255) DEFAULT '第{week}周排班表',
 		semester_start_date DATE DEFAULT NULL COMMENT '学期起始日',
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+		UNIQUE KEY uk_config_key (config_key),
+		KEY idx_admin_id (admin_id)
 	) ENGINE=InnoDB COMMENT='排班设置表'`)
 	if err != nil {
 		return fmt.Errorf("创建schedule_settings表失败: %v", err)
+	}
+
+	// 排班设置单例行（幂等）
+	_, err = database.Exec(`INSERT IGNORE INTO schedule_settings (config_key, admin_id, current_week, auto_increment, need_per_cell, min_per_cell, max_per_day, max_per_week, export_title, semester_start_date)
+		VALUES ('global', 1, 1, 0, 2, 0, 1, 2, '第{week}周排班表', NULL)`)
+	if err != nil {
+		return fmt.Errorf("插入schedule_settings单例行失败: %v", err)
 	}
 
 	// 导出模板表
@@ -326,7 +344,11 @@ func (s *SystemService) executeInitSQL(database *sql.DB) error {
 		is_active BOOLEAN DEFAULT TRUE COMMENT '是否有效',
 		INDEX idx_user_id (user_id),
 		INDEX idx_expires_at (expires_at),
-		INDEX idx_is_active (is_active)
+		INDEX idx_is_active (is_active),
+		INDEX idx_user_perm_active (user_id, permission, is_active),
+		KEY fk_tp_granted_by (granted_by),
+		CONSTRAINT fk_tp_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+		CONSTRAINT fk_tp_granted_by FOREIGN KEY (granted_by) REFERENCES users(id)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户临时权限表'`)
 	if err != nil {
 		return fmt.Errorf("创建user_permissions_temp表失败: %v", err)
@@ -360,8 +382,10 @@ func (s *SystemService) executeInitSQL(database *sql.DB) error {
 		expires_at TIMESTAMP NULL DEFAULT NULL COMMENT '过期时间',
 		is_used BOOLEAN DEFAULT FALSE COMMENT '是否已使用',
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		INDEX idx_token (token),
-		INDEX idx_expires_at (expires_at)
+		UNIQUE KEY uk_token (token),
+		INDEX idx_expires_at (expires_at),
+		KEY fk_prt_user (user_id),
+		CONSTRAINT fk_prt_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='密码重置令牌表'`)
 	if err != nil {
 		return fmt.Errorf("创建password_reset_tokens表失败: %v", err)
@@ -404,7 +428,12 @@ func (s *SystemService) executeInitSQL(database *sql.DB) error {
 		INDEX idx_applicant (applicant_id),
 		INDEX idx_type (type_code),
 		INDEX idx_status (status),
-		INDEX idx_department (department)
+		INDEX idx_department (department),
+		INDEX idx_status_type (status, type_code),
+		INDEX idx_applicant_status (applicant_id, status),
+		CONSTRAINT fk_app_type FOREIGN KEY (type_code) REFERENCES application_types(code),
+		CONSTRAINT fk_app_applicant FOREIGN KEY (applicant_id) REFERENCES users(id),
+		CONSTRAINT fk_app_approver FOREIGN KEY (approver_id) REFERENCES users(id)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='申请表'`)
 	if err != nil {
 		return fmt.Errorf("创建applications表失败: %v", err)
@@ -421,7 +450,9 @@ func (s *SystemService) executeInitSQL(database *sql.DB) error {
 		data JSON COMMENT '附加数据',
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		INDEX idx_application (application_id),
-		INDEX idx_approver (approver_id)
+		INDEX idx_approver (approver_id),
+		CONSTRAINT fk_aprv_application FOREIGN KEY (application_id) REFERENCES applications(id) ON DELETE CASCADE,
+		CONSTRAINT fk_aprv_approver FOREIGN KEY (approver_id) REFERENCES users(id)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='审批历史表'`)
 	if err != nil {
 		return fmt.Errorf("创建application_approvals表失败: %v", err)
@@ -437,10 +468,61 @@ func (s *SystemService) executeInitSQL(database *sql.DB) error {
 		is_active TINYINT(1) DEFAULT 1,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE KEY uk_type_level (type_code, level),
-		INDEX idx_type (type_code)
+		INDEX idx_type (type_code),
+		KEY fk_aprver_specific (specific_user_id),
+		CONSTRAINT fk_aprver_specific FOREIGN KEY (specific_user_id) REFERENCES users(id)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='审批人配置表'`)
 	if err != nil {
 		return fmt.Errorf("创建application_approvers表失败: %v", err)
+	}
+
+	// 请假表（复用审批流）
+	_, err = database.Exec(`CREATE TABLE IF NOT EXISTS leave_requests (
+		id INT PRIMARY KEY AUTO_INCREMENT,
+		application_id INT NOT NULL COMMENT '关联审批单',
+		user_id INT NOT NULL COMMENT '请假人',
+		leave_type ENUM('sick','personal','annual') NOT NULL COMMENT '请假类型',
+		start_date DATE NOT NULL COMMENT '开始日期',
+		end_date DATE NOT NULL COMMENT '结束日期',
+		status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending' COMMENT '状态',
+		reason VARCHAR(255) COMMENT '请假原因',
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+		UNIQUE KEY uk_application (application_id),
+		KEY idx_user_date (user_id, start_date, end_date),
+		CONSTRAINT fk_leave_application FOREIGN KEY (application_id) REFERENCES applications(id) ON DELETE CASCADE,
+		CONSTRAINT fk_leave_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+		CONSTRAINT chk_leave_date CHECK (end_date >= start_date)
+	) ENGINE=InnoDB COMMENT='请假表'`)
+	if err != nil {
+		return fmt.Errorf("创建leave_requests表失败: %v", err)
+	}
+
+	// 预注册待激活账号表
+	_, err = database.Exec(`CREATE TABLE IF NOT EXISTS user_invitations (
+		id INT PRIMARY KEY AUTO_INCREMENT,
+		student_id VARCHAR(20) NOT NULL COMMENT '学号',
+		name VARCHAR(50) NOT NULL COMMENT '姓名',
+		email VARCHAR(100) NOT NULL COMMENT '邮箱',
+		department VARCHAR(50) NOT NULL DEFAULT '科普部' COMMENT '部门',
+		dept_role ENUM('dept_admin','dept_member') NOT NULL DEFAULT 'dept_member' COMMENT '部门角色',
+		token VARCHAR(64) NOT NULL COMMENT '激活令牌(SHA-256哈希)',
+		token_expires_at TIMESTAMP NOT NULL COMMENT '过期时间',
+		status ENUM('pending','activated','expired','revoked') NOT NULL DEFAULT 'pending' COMMENT '状态',
+		created_by INT NOT NULL COMMENT '录入人',
+		activated_at TIMESTAMP NULL COMMENT '激活时间',
+		activated_user_id INT NULL COMMENT '激活后关联的正式用户',
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE KEY uk_token (token),
+		UNIQUE KEY uk_student_id (student_id),
+		KEY idx_status (status, token_expires_at),
+		KEY fk_inv_created_by (created_by),
+		KEY fk_inv_activated (activated_user_id),
+		CONSTRAINT fk_inv_created_by FOREIGN KEY (created_by) REFERENCES users(id),
+		CONSTRAINT fk_inv_activated FOREIGN KEY (activated_user_id) REFERENCES users(id) ON DELETE SET NULL
+	) ENGINE=InnoDB COMMENT='预注册待激活账号表'`)
+	if err != nil {
+		return fmt.Errorf("创建user_invitations表失败: %v", err)
 	}
 
 	// 插入默认申请类型
@@ -505,6 +587,261 @@ func (s *SystemService) executeInitSQL(database *sql.DB) error {
 		return fmt.Errorf("插入列表模板失败: %v", err)
 	}
 
+	// 注册数据库逻辑对象（触发器 + 存储过程 + 事件），定义与 migrations/013 保持一致
+	if err := s.registerDBLogic(database); err != nil {
+		return fmt.Errorf("注册数据库逻辑对象失败: %v", err)
+	}
+
+	return nil
+}
+
+// registerDBLogic 创建触发器、存储过程与事件（定义照抄 migrations/013）。
+// 每个对象作为独立的 SQL 语句执行（不含 mysql 客户端的 DELIMITER），
+// DROP ... IF EXISTS 保证幂等。复用调用方传入的连接（multiStatements=true，
+// 单条 CREATE PROCEDURE/TRIGGER/EVENT 语句由服务端正确解析，不受过程体内分号影响）。
+func (s *SystemService) registerDBLogic(database *sql.DB) error {
+	stmts := []string{
+		// ===== 触发器：users.duty_count 自动维护 =====
+		`DROP TRIGGER IF EXISTS trg_duty_count_ai`,
+		`CREATE TRIGGER trg_duty_count_ai AFTER INSERT ON duty_records FOR EACH ROW
+IF NEW.status <> 'cancelled' THEN
+    UPDATE users SET duty_count = duty_count + 1, updated_at = NOW() WHERE id = NEW.user_id;
+END IF`,
+
+		`DROP TRIGGER IF EXISTS trg_duty_count_ad`,
+		`CREATE TRIGGER trg_duty_count_ad AFTER DELETE ON duty_records FOR EACH ROW
+IF OLD.status <> 'cancelled' THEN
+    UPDATE users SET duty_count = duty_count - 1, updated_at = NOW() WHERE id = OLD.user_id;
+END IF`,
+
+		`DROP TRIGGER IF EXISTS trg_duty_count_au`,
+		`CREATE TRIGGER trg_duty_count_au AFTER UPDATE ON duty_records FOR EACH ROW
+IF (OLD.status <> 'cancelled') <> (NEW.status <> 'cancelled') THEN
+    UPDATE users SET duty_count = duty_count + IF(NEW.status <> 'cancelled', 1, -1),
+           updated_at = NOW() WHERE id = NEW.user_id;
+END IF`,
+
+		// ===== 存储过程 =====
+		`DROP PROCEDURE IF EXISTS sp_confirm_schedule`,
+		`CREATE PROCEDURE sp_confirm_schedule(IN p_week INT, IN p_admin_id INT, IN p_cells JSON)
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION BEGIN ROLLBACK; RESIGNAL; END;
+    START TRANSACTION;
+    SELECT config_key FROM schedule_settings WHERE config_key = 'global' FOR UPDATE;
+    IF EXISTS(SELECT 1 FROM duty_records
+              WHERE week = p_week AND status IN ('confirmed','completed')) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '该周已有已确认或完成的排班，禁止重排';
+    END IF;
+    DROP TEMPORARY TABLE IF EXISTS _sp_dept_map;
+    CREATE TEMPORARY TABLE _sp_dept_map (user_id INT PRIMARY KEY, department VARCHAR(50));
+    INSERT INTO _sp_dept_map (user_id, department)
+        SELECT DISTINCT ju.user_id, u.department
+        FROM JSON_TABLE(p_cells, '$[*]' COLUMNS (
+            weekday INT PATH '$.weekday', period INT PATH '$.period',
+            user_ids JSON PATH '$.user_ids')) jt
+        CROSS JOIN JSON_TABLE(jt.user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) ju
+        JOIN users u ON u.id = ju.user_id;
+    DELETE FROM duty_records WHERE week = p_week;
+    INSERT INTO duty_records (week, weekday, period, user_id, department, assigned_by, status)
+    SELECT p_week, jt.weekday, jt.period, ju.user_id, dm.department, p_admin_id, 'pending'
+    FROM JSON_TABLE(p_cells, '$[*]' COLUMNS (
+        weekday INT PATH '$.weekday', period INT PATH '$.period',
+        user_ids JSON PATH '$.user_ids')) jt
+    CROSS JOIN JSON_TABLE(jt.user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) ju
+    JOIN _sp_dept_map dm ON dm.user_id = ju.user_id;
+    DROP TEMPORARY TABLE IF EXISTS _sp_dept_map;
+    COMMIT;
+END`,
+
+		`DROP PROCEDURE IF EXISTS sp_activate_invitation`,
+		`CREATE PROCEDURE sp_activate_invitation(IN p_token_hash VARCHAR(64), IN p_password_hash VARCHAR(255))
+BEGIN
+    DECLARE v_student_id VARCHAR(50);
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION BEGIN ROLLBACK; RESIGNAL; END;
+    START TRANSACTION;
+    SELECT id INTO @inv_id FROM user_invitations
+        WHERE token = p_token_hash AND status = 'pending' FOR UPDATE;
+    IF @inv_id IS NULL THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '令牌无效或已使用';
+    END IF;
+    IF (SELECT token_expires_at FROM user_invitations WHERE id = @inv_id) < NOW() THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '令牌已过期';
+    END IF;
+    SELECT student_id INTO v_student_id FROM user_invitations WHERE id = @inv_id;
+    UPDATE users u
+    JOIN user_invitations inv ON inv.id = @inv_id AND u.student_id = inv.student_id
+       SET u.employment_status = 'active',
+           u.password = p_password_hash,
+           u.email = COALESCE(inv.email, u.email),
+           u.updated_at = NOW()
+     WHERE u.employment_status = 'pending';
+    IF ROW_COUNT() = 0 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '用户记录不存在或状态异常';
+    END IF;
+    UPDATE user_invitations
+        SET status = 'activated', activated_at = NOW(),
+            activated_user_id = (SELECT id FROM users WHERE student_id = v_student_id)
+        WHERE id = @inv_id;
+    COMMIT;
+END`,
+
+		`DROP PROCEDURE IF EXISTS sp_mark_user_resigned`,
+		`CREATE PROCEDURE sp_mark_user_resigned(IN p_user_id INT, IN p_admin_id INT)
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION BEGIN ROLLBACK; RESIGNAL; END;
+    START TRANSACTION;
+    UPDATE users SET employment_status = 'resigned' WHERE id = p_user_id;
+    UPDATE duty_records SET status = 'cancelled'
+        WHERE user_id = p_user_id AND status = 'pending';
+    UPDATE user_permissions_temp SET is_active = 0
+        WHERE user_id = p_user_id AND is_active = 1;
+    COMMIT;
+END`,
+
+		`DROP PROCEDURE IF EXISTS sp_mark_users_resigned`,
+		`CREATE PROCEDURE sp_mark_users_resigned(IN p_user_ids JSON, IN p_admin_id INT)
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION BEGIN ROLLBACK; RESIGNAL; END;
+    START TRANSACTION;
+    UPDATE users u
+    JOIN JSON_TABLE(p_user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) jt ON u.id = jt.user_id
+       SET u.employment_status = 'resigned', u.updated_at = NOW()
+     WHERE u.employment_status = 'active';
+    UPDATE duty_records dr
+    JOIN JSON_TABLE(p_user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) jt ON dr.user_id = jt.user_id
+       SET dr.status = 'cancelled', dr.updated_at = NOW()
+     WHERE dr.status = 'pending';
+    UPDATE user_permissions_temp pt
+    JOIN JSON_TABLE(p_user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) jt ON pt.user_id = jt.user_id
+       SET pt.is_active = 0, pt.updated_at = NOW()
+     WHERE pt.is_active = 1;
+    COMMIT;
+END`,
+
+		`DROP PROCEDURE IF EXISTS sp_approve_leave`,
+		`CREATE PROCEDURE sp_approve_leave(IN p_application_id INT, IN p_week_start DATE)
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION BEGIN ROLLBACK; RESIGNAL; END;
+    START TRANSACTION;
+    UPDATE leave_requests SET status = 'approved' WHERE application_id = p_application_id;
+    UPDATE duty_records dr
+    JOIN leave_requests lr ON lr.application_id = p_application_id AND lr.user_id = dr.user_id
+    SET dr.status = 'cancelled', dr.updated_at = NOW()
+    WHERE dr.status IN ('pending', 'confirmed')
+      AND DATE_ADD(p_week_start, INTERVAL (dr.week - 1) * 7 + (dr.weekday - 1) DAY)
+          BETWEEN lr.start_date AND lr.end_date;
+    COMMIT;
+END`,
+
+		`DROP PROCEDURE IF EXISTS sp_update_schedule_cell`,
+		`CREATE PROCEDURE sp_update_schedule_cell(
+    IN p_week INT, IN p_weekday INT, IN p_period INT,
+    IN p_admin_id INT, IN p_add_user_ids JSON, IN p_remove_user_ids JSON)
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION BEGIN ROLLBACK; RESIGNAL; END;
+    START TRANSACTION;
+    SELECT config_key FROM schedule_settings WHERE config_key = 'global' FOR UPDATE;
+    IF EXISTS(SELECT 1 FROM duty_records
+              WHERE week = p_week AND weekday = p_weekday AND period = p_period
+                AND status IN ('confirmed','completed')) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '该时段已确认/完成，禁止修改';
+    END IF;
+    DELETE FROM duty_records
+        WHERE week = p_week AND weekday = p_weekday AND period = p_period
+          AND user_id IN (SELECT CAST(jt.user_id AS UNSIGNED)
+                          FROM JSON_TABLE(p_remove_user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) jt);
+    DROP TEMPORARY TABLE IF EXISTS _sp_dept_map;
+    CREATE TEMPORARY TABLE _sp_dept_map (user_id INT PRIMARY KEY, department VARCHAR(50));
+    INSERT INTO _sp_dept_map (user_id, department)
+        SELECT ju.user_id, u.department
+        FROM JSON_TABLE(p_add_user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) ju
+        JOIN users u ON u.id = ju.user_id
+        WHERE u.employment_status = 'active';
+    INSERT IGNORE INTO duty_records (week, weekday, period, user_id, department, assigned_by, status)
+    SELECT p_week, p_weekday, p_period, ju.user_id, dm.department, p_admin_id, 'pending'
+    FROM JSON_TABLE(p_add_user_ids, '$[*]' COLUMNS (user_id INT PATH '$')) ju
+    JOIN _sp_dept_map dm ON dm.user_id = ju.user_id;
+    DROP TEMPORARY TABLE IF EXISTS _sp_dept_map;
+    COMMIT;
+END`,
+
+		`DROP PROCEDURE IF EXISTS sp_publish_weekly_assignments`,
+		`CREATE PROCEDURE sp_publish_weekly_assignments(IN p_week INT, IN p_admin_id INT, IN p_items JSON)
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION BEGIN ROLLBACK; RESIGNAL; END;
+    START TRANSACTION;
+    DELETE FROM weekly_duty_assignments WHERE week = p_week;
+    INSERT INTO weekly_duty_assignments (week, department, weekday, is_assigned, created_by)
+    SELECT p_week, jt.department, jt.weekday, IF(jt.is_assigned = 1, TRUE, FALSE), p_admin_id
+    FROM JSON_TABLE(p_items, '$[*]' COLUMNS (
+        department VARCHAR(50) PATH '$.department',
+        weekday INT PATH '$.weekday',
+        is_assigned INT PATH '$.is_assigned')) jt;
+    COMMIT;
+END`,
+
+		`DROP PROCEDURE IF EXISTS sp_replace_availability`,
+		`CREATE PROCEDURE sp_replace_availability(IN p_user_id INT, IN p_items JSON)
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION BEGIN ROLLBACK; RESIGNAL; END;
+    START TRANSACTION;
+    DELETE FROM availability WHERE user_id = p_user_id;
+    INSERT IGNORE INTO availability (user_id, week, weekday, period)
+    SELECT p_user_id, jt.week, jt.weekday, jt.period
+    FROM JSON_TABLE(p_items, '$[*]' COLUMNS (
+        week INT PATH '$.week', weekday INT PATH '$.weekday', period INT PATH '$.period')) jt;
+    COMMIT;
+END`,
+
+		`DROP PROCEDURE IF EXISTS sp_advance_application`,
+		`CREATE PROCEDURE sp_advance_application(
+    IN p_app_id INT, IN p_approver_id INT, IN p_action TINYINT,
+    IN p_comment TEXT, IN p_expected_status TINYINT, IN p_new_status TINYINT)
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION BEGIN ROLLBACK; RESIGNAL; END;
+    START TRANSACTION;
+    UPDATE applications
+       SET status = p_new_status, updated_at = NOW()
+     WHERE id = p_app_id AND status = p_expected_status;
+    IF ROW_COUNT() = 0 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '申请状态已变更，请刷新后重试';
+    END IF;
+    INSERT INTO application_approvals (application_id, approver_id, action, comment, level, created_at)
+    SELECT p_app_id, p_approver_id, p_action, p_comment,
+           current_level, NOW() FROM applications WHERE id = p_app_id;
+    COMMIT;
+END`,
+
+		// ===== 事件调度：周期清理 =====
+		`DROP EVENT IF EXISTS evt_cleanup_expired`,
+		`CREATE EVENT evt_cleanup_expired
+ON SCHEDULE EVERY 1 HOUR
+DO
+BEGIN
+    DECLARE v_done INT DEFAULT 0;
+    SET v_done = 1;
+    WHILE v_done > 0 DO
+        UPDATE user_permissions_temp SET is_active = 0 WHERE expires_at < NOW() AND is_active = 1 LIMIT 1000;
+        SET v_done = ROW_COUNT();
+    END WHILE;
+    SET v_done = 1;
+    WHILE v_done > 0 DO
+        UPDATE user_invitations SET status = 'expired' WHERE token_expires_at < NOW() AND status = 'pending' LIMIT 1000;
+        SET v_done = ROW_COUNT();
+    END WHILE;
+    SET v_done = 1;
+    WHILE v_done > 0 DO
+        DELETE FROM password_reset_tokens WHERE (expires_at < NOW() OR is_used = 1) LIMIT 1000;
+        SET v_done = ROW_COUNT();
+    END WHILE;
+END`,
+	}
+
+	for i, stmt := range stmts {
+		if _, err := database.Exec(stmt); err != nil {
+			return fmt.Errorf("执行逻辑对象SQL失败(第%d条): %v", i, err)
+		}
+	}
 	return nil
 }
 
@@ -524,7 +861,7 @@ func (s *SystemService) CreateAdmin(studentID, name, email, password, department
 
 	// 插入用户（默认为部门管理员）
 	result, err := database.Exec(
-		"INSERT INTO users (student_id, name, email, password, role, department, dept_role, is_active) VALUES (?, ?, ?, ?, 'admin', ?, 'dept_admin', 1)",
+		"INSERT INTO users (student_id, name, email, password, role, department, dept_role, employment_status) VALUES (?, ?, ?, ?, 'admin', ?, 'dept_admin', 'active')",
 		studentID, name, email, string(hashedPassword), department)
 	if err != nil {
 		return nil, fmt.Errorf("创建用户失败: %v", err)
