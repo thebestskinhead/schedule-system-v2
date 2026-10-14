@@ -217,15 +217,15 @@ user:manage:all (用户管理-全部)
 {
   "permission": "schedule:manage:dept",
   "resource_type": "dept",
-  "resource_id": 0
+  "resource_id": 4
 }
 ```
 
-**效果**: 可以管理用户**当前所在部门**的排班
+**效果**: 可以管理 `resource_id` 指定部门的排班
 
 **特点**: 
-- resource_id=0 表示动态跟随用户部门
-- 用户部门变更时，权限自动适应新部门
+- 授予时由后端按被授权人所在部门写入实际部门 ID，不接受客户端指定
+- 范围判定按部门 ID 精确匹配；被授权人归属部门无效时不授予
 
 #### 3. 特定权限 (user)
 
