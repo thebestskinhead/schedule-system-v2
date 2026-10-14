@@ -275,7 +275,7 @@ CREATE TABLE `user_permissions_temp` (
   `resource_type` varchar(20) DEFAULT 'all' COMMENT '资源类型(all/dept/user)',
   `resource_id` int DEFAULT '0' COMMENT '资源ID(部门ID或用户ID)',
   `granted_by` int NOT NULL COMMENT '授权人ID',
-  `reason` varchar(255) DEFAULT NULL COMMENT '授权原因',
+  `reason` varchar(255) NOT NULL DEFAULT '' COMMENT '授权原因',
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `expires_at` timestamp NULL DEFAULT NULL,
   `is_active` tinyint(1) DEFAULT '1' COMMENT '是否有效',

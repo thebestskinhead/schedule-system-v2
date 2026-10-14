@@ -193,26 +193,6 @@ func (d *ApplicationDao) UpdateStatusWithCheck(ctx context.Context, appID int, e
 	return affected > 0, nil
 }
 
-// IsApproverForApplication 检查用户是否可以审批某个申请
-func (d *ApplicationDao) IsApproverForApplication(ctx context.Context, appID, userID int) (bool, error) {
-	// 获取申请信息
-	app, err := d.GetByID(ctx, appID)
-	if err != nil {
-		return false, err
-	}
-	
-	// 获取审批流程配置
-	query := `SELECT COUNT(*) FROM application_approvers 
-		WHERE application_id = ? AND approver_id = ? AND level = ?`
-	var count int
-	err = db.GetDB().Get(&count, query, appID, userID, app.CurrentLevel)
-	if err != nil {
-		return false, err
-	}
-	
-	return count > 0, nil
-}
-
 // ========== 审批历史操作 ==========
 
 // CreateApproval 创建审批记录

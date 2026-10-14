@@ -338,7 +338,7 @@ func (s *SystemService) executeInitSQL(database *sql.DB) error {
 		resource_type VARCHAR(20) DEFAULT 'all' COMMENT '资源类型(all/dept/user)',
 		resource_id INT DEFAULT 0 COMMENT '资源ID(部门ID或用户ID)',
 		granted_by INT NOT NULL COMMENT '授权人ID',
-		reason VARCHAR(255) COMMENT '授权原因',
+		reason VARCHAR(255) NOT NULL DEFAULT '' COMMENT '授权原因',
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		expires_at TIMESTAMP NULL DEFAULT NULL COMMENT '过期时间',
 		is_active BOOLEAN DEFAULT TRUE COMMENT '是否有效',

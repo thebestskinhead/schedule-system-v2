@@ -96,9 +96,15 @@ func (s *ApplicationService) CreateApplication(ctx context.Context, userID int, 
 
 	// 创建申请对象
 	now := time.Now()
+	// 记录申请人当前部门：部门级权限授予按此推导资源范围，缺失会导致范围退化为 0（全部门通配）
+	applicant, err := s.userDao.GetByID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("获取申请人信息失败: %v", err)
+	}
 	application := &model.Application{
 		TypeCode:    appType,
 		ApplicantID: userID,
+		Department:  applicant.Department,
 		Status:      model.ApplicationStatusPending,
 		Data:        data,
 		Title:       reason, // 使用 reason 作为标题
@@ -108,33 +114,11 @@ func (s *ApplicationService) CreateApplication(ctx context.Context, userID int, 
 		UpdatedAt:   now,
 	}
 
-	// 生成申请编号（撞唯一键时应用层重试 ≤3 次，见 G 项）
-	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
-		appNo, err := s.applicationDao.GenerateApplicationNo(ctx, appType)
-		if err != nil {
-			return nil, err
-		}
-		application.ApplicationNo = appNo
-		if err := s.applicationDao.Create(ctx, application); err != nil {
-			if db.IsDuplicateEntry(err) {
-				lastErr = err
-				continue // 唯一键冲突：重新生成编号后重试
-			}
-			return nil, err
-		}
-		lastErr = nil
-		break
-	}
-	if lastErr != nil {
-		return nil, fmt.Errorf("生成申请编号失败（唯一键冲突）: %w", lastErr)
-	}
-
-	// 解析配置获取默认审批流程
+	// 解析配置获取默认审批流程（须在落库前完成，TotalLevels 随首次 INSERT 一并写入）
 	var typeConfig model.TypeConfig
 	if len(appTypeConfig.Config) > 0 {
 		if err := json.Unmarshal(appTypeConfig.Config, &typeConfig); err != nil {
-			// 如果解析失败，使用默认配置
+			// 解析失败使用默认配置
 			typeConfig = model.TypeConfig{
 				Fields: []model.FieldConfig{},
 				Flow:   []model.FlowStep{{Level: 1, Role: "dept_admin", Label: "部门管理员审批"}},
@@ -155,9 +139,26 @@ func (s *ApplicationService) CreateApplication(ctx context.Context, userID int, 
 		application.TotalLevels = 1
 	}
 
-	// 保存申请
-	if err := s.applicationDao.Create(ctx, application); err != nil {
-		return nil, err
+	// 生成申请编号并落库（撞唯一键时应用层重试 ≤3 次，见 G 项）
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		appNo, err := s.applicationDao.GenerateApplicationNo(ctx, appType)
+		if err != nil {
+			return nil, err
+		}
+		application.ApplicationNo = appNo
+		if err := s.applicationDao.Create(ctx, application); err != nil {
+			if db.IsDuplicateEntry(err) {
+				lastErr = err
+				continue // 唯一键冲突：重新生成编号后重试
+			}
+			return nil, err
+		}
+		lastErr = nil
+		break
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("生成申请编号失败（唯一键冲突）: %w", lastErr)
 	}
 
 	// 审批流程配置在 application_types 表中，不需要为每个申请创建审批人配置
@@ -207,12 +208,12 @@ func (s *ApplicationService) GetApplicationDetail(ctx context.Context, appID int
 
 	// 检查权限：申请人自己、审批人或管理员可以查看
 	if app.ApplicantID != userID && !isAdmin {
-		// 检查是否是审批人
-		isApprover, err := s.applicationDao.IsApproverForApplication(ctx, appID, userID)
+		// 审批人可查看（复用审批权限判定：按申请类型流程配置 + 身份 + 部门）
+		canView, err := s.canApprove(ctx, app, userID)
 		if err != nil {
 			return nil, err
 		}
-		if !isApprover {
+		if !canView {
 			return nil, fmt.Errorf("无权查看此申请")
 		}
 	}

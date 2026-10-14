@@ -97,8 +97,18 @@ func (e *TempPermissionExecutor) OnApproved(ctx context.Context, app *model.Appl
 		return fmt.Errorf("解析申请数据失败: %v", err)
 	}
 
+	// 部门级权限的资源范围以申请人 users 表实时部门为准：
+	// applications.department 为冗余字段，缺失或过期时若按其推导，会把范围退化成 0（全部门通配）。
+	applicant, err := e.userDao.GetByID(app.ApplicantID)
+	if err != nil || applicant == nil {
+		return fmt.Errorf("获取申请人信息失败: %v", err)
+	}
+
 	// 资源范围按申请人身份与权限语义推导：部门级权限限定在申请人所在部门，全局权限为 all
-	resourceType, resourceID := auth.GrantResourceScope(model.Permission(data.Permission), app.Department)
+	resourceType, resourceID := auth.GrantResourceScope(model.Permission(data.Permission), applicant.Department)
+	if resourceType == "dept" && resourceID == 0 {
+		return fmt.Errorf("申请人所在部门无效，无法授予部门级权限")
+	}
 
 	// 创建临时权限记录
 	tempPerm := &model.UserPermissionTemp{

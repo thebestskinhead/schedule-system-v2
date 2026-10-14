@@ -52,6 +52,11 @@ func (s *TempPermissionService) GrantPermission(adminID int, checker *auth.Check
 	// 资源范围由后端按被授权人身份与权限语义推导，不接受客户端指定
 	resourceType, resourceID := auth.GrantResourceScope(req.Permission, user.Department)
 
+	// 部门级权限要求被授权人归属有效部门：范围 0 会被判定层视为全部门通配，必须拒绝落库
+	if resourceType == "dept" && resourceID == 0 {
+		return errors.New("目标用户所在部门无效，无法授予部门级权限")
+	}
+
 	// 权限边界：授予的范围不得超出授权人自身有效权限范围
 	if !s.canGrantPermission(checker, req.Permission, resourceType, resourceID) {
 		return errors.New("不得授予超出自身范围的权限")
