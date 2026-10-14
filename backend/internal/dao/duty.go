@@ -156,55 +156,6 @@ func (d *DutyDAO) BatchCountByUsers(userIDs []int) (map[int]int64, error) {
 	return result, nil
 }
 
-// BatchCountByWeek 批量查询某周排班次数
-func (d *DutyDAO) BatchCountByWeek(week int, userIDs []int) (map[int]int64, error) {
-	result := make(map[int]int64)
-	if len(userIDs) == 0 {
-		return result, nil
-	}
-	query := `SELECT user_id, COUNT(*) as cnt FROM duty_records WHERE week = ? AND user_id IN (?) GROUP BY user_id`
-	rows, err := db.GetDB().Queryx(query, week, userIDs)
-	if err != nil {
-		return result, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var uid int
-		var cnt int64
-		if err := rows.Scan(&uid, &cnt); err != nil {
-			continue
-		}
-		result[uid] = cnt
-	}
-	return result, nil
-}
-
-// BatchCountByWeekDay 批量查询某周各天排班次数
-func (d *DutyDAO) BatchCountByWeekDay(week int, userIDs []int) (map[int]map[int]int64, error) {
-	result := make(map[int]map[int]int64)
-	if len(userIDs) == 0 {
-		return result, nil
-	}
-	query := `SELECT user_id, weekday, COUNT(*) as cnt FROM duty_records WHERE week = ? AND user_id IN (?) GROUP BY user_id, weekday`
-	rows, err := db.GetDB().Queryx(query, week, userIDs)
-	if err != nil {
-		return result, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var uid, wd int
-		var cnt int64
-		if err := rows.Scan(&uid, &wd, &cnt); err != nil {
-			continue
-		}
-		if result[uid] == nil {
-			result[uid] = make(map[int]int64)
-		}
-		result[uid][wd] = cnt
-	}
-	return result, nil
-}
-
 // DeleteByWeekdayPeriodAndUser 删除指定时段的特定用户
 func (d *DutyDAO) DeleteByWeekdayPeriodAndUser(week, weekday, period, userID int) error {
 	query := `DELETE FROM duty_records WHERE week = ? AND weekday = ? AND period = ? AND user_id = ?`

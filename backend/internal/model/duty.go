@@ -164,7 +164,5 @@ type AvailabilityMatrixItem struct {
 
 // UserDutyCounts 用户排班计数聚合
 type UserDutyCounts struct {
-	Total   map[int]int64            // user_id -> 全历史次数
-	ByWeek  map[int]int64            // user_id -> 本周次数
-	ByDay   map[int]map[int]int64    // user_id -> weekday -> 当天次数
+	Total map[int]int64 // user_id -> 全历史有效班次数
 }

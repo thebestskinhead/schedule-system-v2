@@ -71,16 +71,12 @@ func (s *ScheduleService) PreviewSchedule(req *model.ScheduleRequest) (*model.Sc
 		userMap[u.ID] = u
 	}
 
-	// 1c. 拉取历史计数（全历史、本周、本周各天）
+	// 1c. 拉取历史计数（全历史有效班次，用于负担均衡排序）
 	historyTotal, _ := s.dutyDAO.BatchCountByUsers(userIDs)
-	historyWeek, _ := s.dutyDAO.BatchCountByWeek(req.Week, userIDs)
-	historyDay, _ := s.dutyDAO.BatchCountByWeekDay(req.Week, userIDs)
 
 	// 构建内存只读快照
 	counts := model.UserDutyCounts{
 		Total: historyTotal,
-		ByWeek: historyWeek,
-		ByDay: historyDay,
 	}
 
 	// ---------- 2. GRASP 多启动阶段（50次迭代） ----------
@@ -134,22 +130,17 @@ func (s *ScheduleService) PreviewSchedule(req *model.ScheduleRequest) (*model.Sc
 			}
 
 			// 过滤：MaxPerWeek / MaxPerDay
+			// 本周/当天计数以本次预览的本地累计为准（本周初始次数恒为 0，不回查当周库数据）
 			var filtered []int
 			for _, uid := range availableIDs {
-				histWeek := counts.ByWeek[uid]
-				prevWeek := int64(previewWeekCount[uid])
-				if histWeek+prevWeek >= int64(req.MaxPerWeek) {
+				if int64(previewWeekCount[uid]) >= int64(req.MaxPerWeek) {
 					continue
-				}
-				histDay := int64(0)
-				if counts.ByDay[uid] != nil {
-					histDay = counts.ByDay[uid][sk.weekday]
 				}
 				prevDay := int64(0)
 				if previewDayCount[uid] != nil {
 					prevDay = int64(previewDayCount[uid][sk.weekday])
 				}
-				if histDay+prevDay >= int64(req.MaxPerDay) {
+				if prevDay >= int64(req.MaxPerDay) {
 					continue
 				}
 				filtered = append(filtered, uid)
@@ -251,10 +242,8 @@ func (s *ScheduleService) PreviewSchedule(req *model.ScheduleRequest) (*model.Sc
 						continue
 					}
 
-						// 检查是否因 MaxPerDay/MaxPerWeek 被过滤
-						histWeek := counts.ByWeek[uid]
-						prevWeek := int64(previewWeekCount[uid])
-						if histWeek+prevWeek >= int64(req.MaxPerWeek) {
+						// 检查是否因 MaxPerWeek/MaxPerDay 被过滤（本周/当天计数以本地累计为准）
+						if int64(previewWeekCount[uid]) >= int64(req.MaxPerWeek) {
 							// 被 MaxPerWeek 过滤，检查是否已排 >= 2
 							if previewWeekCount[uid] >= 2 {
 								// 尝试撤销其旧班（优先同天）
@@ -267,15 +256,11 @@ func (s *ScheduleService) PreviewSchedule(req *model.ScheduleRequest) (*model.Sc
 							continue
 						}
 
-						histDay := int64(0)
-						if counts.ByDay[uid] != nil {
-							histDay = counts.ByDay[uid][cf.Weekday]
-						}
 						prevDay := int64(0)
 						if previewDayCount[uid] != nil {
 							prevDay = int64(previewDayCount[uid][cf.Weekday])
 						}
-						if histDay+prevDay >= int64(req.MaxPerDay) {
+						if prevDay >= int64(req.MaxPerDay) {
 							// 被 MaxPerDay 过滤，检查是否已排 >= 2
 							if previewWeekCount[uid] >= 2 {
 								if s.tryRevokeAndAssign(grid, uid, cf.Weekday, cf.Period, previewWeekCount, previewDayCount, counts, req, userMap) {
