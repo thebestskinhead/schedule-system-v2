@@ -120,6 +120,7 @@ const showTestDialog = ref(false)
 const showEncryptionPicker = ref(false)
 
 const form = reactive({
+  id: null,
   host: '',
   port: 587,
   use_tls: true,
@@ -173,6 +174,7 @@ const loadConfig = async () => {
     const data = await getSMTPConfig()
     if (data) {
       Object.assign(form, {
+        id: data.id || null,
         host: data.host || '',
         port: data.port || 587,
         use_tls: data.use_tls !== undefined ? data.use_tls : true,
@@ -217,7 +219,7 @@ const sendTest = async () => {
   testForm.to = to
   testing.value = true
   try {
-    await testSMTPConfig({ to })
+    await testSMTPConfig({ to, ...form })
     showToast({ message: '测试邮件已发送', type: 'success' })
     showTestDialog.value = false
   } finally {

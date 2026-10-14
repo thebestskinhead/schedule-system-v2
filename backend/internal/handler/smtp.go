@@ -63,6 +63,9 @@ func (h *SMTPHandler) SaveConfig(c *gin.Context) {
 		return
 	}
 
+	// 本页为单配置页：保存后该配置即作为当前生效的 SMTP 配置。
+	req.IsActive = true
+
 	if err := h.service.SaveConfig(&req); err != nil {
 		utils.Error(c, 500, "保存失败: "+err.Error())
 		return
@@ -102,7 +105,47 @@ func (h *SMTPHandler) TestEmail(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.TestEmail(to); err != nil {
+	// 请求中携带服务器地址时，直接使用请求内的配置发送（便于测试尚未保存的配置）
+	if strings.TrimSpace(req.Host) != "" {
+		cfg := &model.SMTPConfig{
+			Host:      strings.TrimSpace(req.Host),
+			Port:      req.Port,
+			Username:  strings.TrimSpace(req.Username),
+			Password:  req.Password,
+			From:      strings.TrimSpace(req.From),
+			FromEmail: utils.NormalizeEmail(req.FromEmail),
+			UseTLS:    req.UseTLS,
+			UseSSL:    req.UseSSL,
+		}
+		if cfg.Port == 0 {
+			cfg.Port = 587
+		}
+		if cfg.From == "" {
+			cfg.From = "排班系统"
+		}
+		if cfg.Username == "" || cfg.FromEmail == "" {
+			utils.Error(c, 400, "SMTP 配置不完整，请填写服务器、用户名与发件人邮箱")
+			return
+		}
+		if !utils.IsEmail(cfg.FromEmail) {
+			utils.Error(c, 400, "发件人邮箱格式不正确")
+			return
+		}
+		if err := h.service.TestEmailWithConfig(cfg, to); err != nil {
+			utils.Error(c, 500, "发送失败: "+err.Error())
+			return
+		}
+		utils.Success(c, gin.H{"message": "测试邮件已发送"})
+		return
+	}
+
+	// 未携带配置时，使用已保存的配置发送
+	cfg, err := h.service.GetConfig()
+	if err != nil {
+		utils.Error(c, 400, "尚未配置 SMTP，请先填写并保存配置")
+		return
+	}
+	if err := h.service.TestEmailWithConfig(cfg, to); err != nil {
 		utils.Error(c, 500, "发送失败: "+err.Error())
 		return
 	}

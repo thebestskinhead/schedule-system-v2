@@ -57,13 +57,17 @@ func (s *SMTPService) DeleteConfig(id int) error {
 	return s.smtpDAO.DeleteConfig(id)
 }
 
-// TestEmail 发送测试邮件
+// TestEmail 使用当前生效的配置发送测试邮件
 func (s *SMTPService) TestEmail(to string) error {
 	smtpConfig, err := s.smtpDAO.GetConfig()
 	if err != nil {
-		return fmt.Errorf("未配置SMTP或配置无效: %v", err)
+		return err
 	}
+	return s.TestEmailWithConfig(smtpConfig, to)
+}
 
+// TestEmailWithConfig 使用指定配置发送测试邮件
+func (s *SMTPService) TestEmailWithConfig(smtpConfig *model.SMTPConfig, to string) error {
 	subject := "SMTP测试邮件 - 排班系统"
 	body := `
 <h2>排班系统 SMTP 测试</h2>

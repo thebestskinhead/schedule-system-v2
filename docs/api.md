@@ -1746,7 +1746,8 @@ Authorization: Bearer <token>
 | from_email | string | 是 | 发件人邮箱 |
 | use_tls | bool | 是 | 是否使用TLS |
 | use_ssl | bool | 是 | 是否使用SSL |
-| is_active | bool | 否 | 是否设为活跃配置 |
+
+保存后该配置即作为当前生效的配置。
 
 **权限要求:** `system:admin`
 
@@ -1773,6 +1774,16 @@ Authorization: Bearer <token>
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | to | string | 是 | 测试收件人邮箱 |
+| host | string | 否 | SMTP服务器 |
+| port | int | 否 | 端口(1-65535) |
+| username | string | 否 | 用户名 |
+| password | string | 否 | 密码 |
+| from | string | 否 | 发件人名称 |
+| from_email | string | 否 | 发件人邮箱 |
+| use_tls | bool | 否 | 是否使用TLS |
+| use_ssl | bool | 否 | 是否使用SSL |
+
+省略上述配置项时使用已保存的配置发送；携带 `host` 时直接使用请求中的配置发送（无需先保存）。
 
 **权限要求:** `system:admin`
 

@@ -19,8 +19,17 @@ type SMTPConfig struct {
 }
 
 // SMTPTestRequest SMTP测试请求
+// 仅 to 为必填；其余字段可选，携带服务器地址时表示直接使用请求中的配置发送测试邮件（可用于测试尚未保存的配置）。
 type SMTPTestRequest struct {
-	To string `json:"to" binding:"required"` // 测试收件人邮箱
+	To        string `json:"to" binding:"required"` // 测试收件人邮箱
+	Host      string `json:"host"`
+	Port      int    `json:"port"`
+	Username  string `json:"username"`
+	Password  string `json:"password"`
+	From      string `json:"from"`
+	FromEmail string `json:"from_email"`
+	UseTLS    bool   `json:"use_tls"`
+	UseSSL    bool   `json:"use_ssl"`
 }
 
 // SMTPTestResponse SMTP测试响应
