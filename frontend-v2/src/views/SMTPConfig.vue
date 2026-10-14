@@ -157,14 +157,22 @@ const saveConfig = async () => {
   }
 }
 
+const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/
+
 const sendTest = async () => {
-  if (!testForm.to) {
+  const to = (testForm.to || '').trim()
+  if (!to) {
     ElMessage.warning('请输入收件邮箱')
     return
   }
+  if (!EMAIL_RE.test(to)) {
+    ElMessage.warning('邮箱格式不正确，请检查是否包含空格或缺少后缀')
+    return
+  }
+  testForm.to = to
   testing.value = true
   try {
-    await testSMTPConfig({ to: testForm.to })
+    await testSMTPConfig({ to })
     ElMessage.success('测试邮件已发送')
     showTestDialog.value = false
   } finally {

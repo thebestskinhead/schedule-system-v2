@@ -20,7 +20,7 @@ type SMTPConfig struct {
 
 // SMTPTestRequest SMTP测试请求
 type SMTPTestRequest struct {
-	To string `json:"to" binding:"required,email"` // 测试收件人邮箱
+	To string `json:"to" binding:"required"` // 测试收件人邮箱
 }
 
 // SMTPTestResponse SMTP测试响应

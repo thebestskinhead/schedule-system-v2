@@ -6,6 +6,7 @@ import (
 	"schedule-system-v2/backend/internal/service"
 	"schedule-system-v2/backend/internal/utils"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -44,7 +45,21 @@ func (h *SMTPHandler) GetActiveConfig(c *gin.Context) {
 func (h *SMTPHandler) SaveConfig(c *gin.Context) {
 	var req model.SMTPConfig
 	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.Error(c, 400, "参数错误: "+err.Error())
+		utils.Error(c, 400, "SMTP 配置不完整或端口无效，请检查后重试")
+		return
+	}
+
+	req.Host = strings.TrimSpace(req.Host)
+	req.Username = strings.TrimSpace(req.Username)
+	req.From = strings.TrimSpace(req.From)
+	req.FromEmail = utils.NormalizeEmail(req.FromEmail)
+
+	if req.Host == "" || req.Username == "" || req.From == "" || req.FromEmail == "" {
+		utils.Error(c, 400, "SMTP 配置不完整或端口无效，请检查后重试")
+		return
+	}
+	if !utils.IsEmail(req.FromEmail) {
+		utils.Error(c, 400, "发件人邮箱格式不正确")
 		return
 	}
 
@@ -77,11 +92,17 @@ func (h *SMTPHandler) DeleteConfig(c *gin.Context) {
 func (h *SMTPHandler) TestEmail(c *gin.Context) {
 	var req model.SMTPTestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.Error(c, 400, "参数错误: "+err.Error())
+		utils.Error(c, 400, "请填写收件邮箱")
 		return
 	}
 
-	if err := h.service.TestEmail(req.To); err != nil {
+	to := utils.NormalizeEmail(req.To)
+	if !utils.IsEmail(to) {
+		utils.Error(c, 400, "收件邮箱格式不正确")
+		return
+	}
+
+	if err := h.service.TestEmail(to); err != nil {
 		utils.Error(c, 500, "发送失败: "+err.Error())
 		return
 	}
