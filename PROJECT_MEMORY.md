@@ -254,31 +254,20 @@ func BuildSchedule(week int, days []int, needPerCell int, maxPerDay int, maxPerW
 
 ## 运行说明
 
-### 启动后端
-```bash
-cd /workspace/schedule-system-v2/backend
-go mod tidy
-go run cmd/server/main.go
+### 启动开发环境
+
+在项目根目录执行：
+
+```powershell
+.\dev.ps1
 ```
 
-### 启动前端
-```bash
-cd /workspace/schedule-system-v2/frontend-v2
-npm install
-npm run dev
-```
-
-### 开发构建（前端嵌入后端）
-```bash
-./dev-build.sh
-cd backend
-go run cmd/server/main.go
-```
+脚本会同时拉起电脑端与移动端的前端开发服务器，并由后端以代理模式转发页面请求。
 
 ### 访问
-- 开发前端: http://localhost:5173
-- 后端API: http://localhost:8080/api/v1
-- 生产模式（前端嵌入后端）: http://localhost:8080
+- 电脑端: http://localhost:8080/
+- 移动端: http://localhost:8080/mobile/
+- 后端 API: http://localhost:8080/api/v1
 
 ---
 

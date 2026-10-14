@@ -89,9 +89,9 @@ const showTestDialog = ref(false)
 
 const form = reactive({
   host: '',
-  port: 587,
-  use_tls: true,
-  use_ssl: false,
+  port: 465,
+  use_tls: false,
+  use_ssl: true,
   username: '',
   password: '',
   from: '排班系统',
@@ -128,7 +128,7 @@ const loadConfig = async () => {
     if (data) {
       Object.assign(form, {
         host: data.host || '',
-        port: data.port || 587,
+        port: data.port || 465,
         use_tls: data.use_tls !== undefined ? data.use_tls : true,
         use_ssl: data.use_ssl || false,
         username: data.username || '',

@@ -98,27 +98,26 @@ func SetupRouter() *gin.Engine {
 		Invitation:   handler.NewInvitationHandler(),
 	}
 
-	// 初始化应用系统相关服务
-	if config.IsInstalled() {
-		userDao := dao.NewUserDAO()
-		tempPermissionDao := dao.NewTempPermissionDAO()
-		applicationDao := dao.NewApplicationDao()
+	// 初始化应用系统相关服务。DAO 与 Service 均为无状态构造，不访问数据库，
+	// 因此路由在启动时即全部注册；实际读写由 db.GetDB() 在调用时解析。
+	userDao := dao.NewUserDAO()
+	tempPermissionDao := dao.NewTempPermissionDAO()
+	applicationDao := dao.NewApplicationDao()
 
-		appManager := service.NewApplicationManager()
-		applicationService := service.NewApplicationService(applicationDao, userDao, appManager)
+	appManager := service.NewApplicationManager()
+	applicationService := service.NewApplicationService(applicationDao, userDao, appManager)
 
-		// 注册临权申请执行器
-		tempPermExecutor := service.NewTempPermissionExecutor(userDao, tempPermissionDao, applicationDao)
-		appManager.Register(tempPermExecutor)
+	// 注册临权申请执行器
+	tempPermExecutor := service.NewTempPermissionExecutor(userDao, tempPermissionDao, applicationDao)
+	appManager.Register(tempPermExecutor)
 
-		// 注册请假申请执行器（H.4.2）：OnApproved 调 sp_approve_leave
-		dutyDao := dao.NewDutyDAO()
-		leaveRequestDao := dao.NewLeaveRequestDAO()
-		leaveExecutor := service.NewLeaveExecutor(userDao, leaveRequestDao, dutyDao, applicationDao)
-		appManager.Register(leaveExecutor)
+	// 注册请假申请执行器（H.4.2）：OnApproved 调 sp_approve_leave
+	dutyDao := dao.NewDutyDAO()
+	leaveRequestDao := dao.NewLeaveRequestDAO()
+	leaveExecutor := service.NewLeaveExecutor(userDao, leaveRequestDao, dutyDao, applicationDao)
+	appManager.Register(leaveExecutor)
 
-		handlers.Application = handler.NewApplicationHandler(applicationService)
-	}
+	handlers.Application = handler.NewApplicationHandler(applicationService)
 
 	// 表驱动注册全部 API 路由（接口 → 权限 单一事实来源）
 	api := r.Group("/api/v1")

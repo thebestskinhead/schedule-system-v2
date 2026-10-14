@@ -262,14 +262,33 @@ func (s *InvitationService) sendActivationEmail(user *model.User, rawToken strin
 	s.smtpService.SendInvitationEmail(user.Email, user.Name, activateURL)
 }
 
-// ResendInvite 重发邀请：重置令牌与过期时间并重新发送邮件（仅 pending/expired/revoked 可重发）
-func (s *InvitationService) ResendInvite(id int, operatorID int) error {
-	inv, err := s.invitationDAO.GetByID(id)
+// resolveInvitationByUserID 由用户 ID 定位其最新邀请记录。
+// 前端「重发邀请」「作废」传的是 users.id（列表行主键），此处先取用户学号，
+// 再按学号取该用户最近一条邀请，保证接口语义与前端一致。
+func (s *InvitationService) resolveInvitationByUserID(userID int) (*model.Invitation, error) {
+	user, err := s.userDAO.GetByID(userID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return errors.New("邀请记录不存在")
+			return nil, errors.New("用户不存在")
 		}
-		return fmt.Errorf("查询邀请失败: %v", err)
+		return nil, fmt.Errorf("查询用户失败: %v", err)
+	}
+
+	inv, err := s.invitationDAO.GetByStudentID(user.StudentID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.New("该用户没有邀请记录")
+		}
+		return nil, fmt.Errorf("查询邀请失败: %v", err)
+	}
+	return inv, nil
+}
+
+// ResendInvite 重发邀请：重置令牌与过期时间并重新发送邮件（仅 pending/expired/revoked 可重发）
+func (s *InvitationService) ResendInvite(userID int, operatorID int) error {
+	inv, err := s.resolveInvitationByUserID(userID)
+	if err != nil {
+		return err
 	}
 	if inv.Status == model.InvitationStatusActivated {
 		return errors.New("该邀请已激活，无需重发")
@@ -279,7 +298,7 @@ func (s *InvitationService) ResendInvite(id int, operatorID int) error {
 	if err != nil {
 		return fmt.Errorf("生成令牌失败: %v", err)
 	}
-	if err := s.invitationDAO.Resend(id, hashToken(rawToken), time.Now().Add(model.InvitationTokenTTL)); err != nil {
+	if err := s.invitationDAO.Resend(inv.ID, hashToken(rawToken), time.Now().Add(model.InvitationTokenTTL)); err != nil {
 		return fmt.Errorf("更新邀请失败: %v", err)
 	}
 
@@ -290,18 +309,15 @@ func (s *InvitationService) ResendInvite(id int, operatorID int) error {
 }
 
 // RevokeInvite 作废邀请（仅 pending/expired 可作废）
-func (s *InvitationService) RevokeInvite(id int) error {
-	inv, err := s.invitationDAO.GetByID(id)
+func (s *InvitationService) RevokeInvite(userID int) error {
+	inv, err := s.resolveInvitationByUserID(userID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return errors.New("邀请记录不存在")
-		}
-		return fmt.Errorf("查询邀请失败: %v", err)
+		return err
 	}
 	if inv.Status == model.InvitationStatusActivated {
 		return errors.New("该邀请已激活，无法作废")
 	}
-	if err := s.invitationDAO.MarkRevoked(id); err != nil {
+	if err := s.invitationDAO.MarkRevoked(inv.ID); err != nil {
 		return fmt.Errorf("作废邀请失败: %v", err)
 	}
 	return nil

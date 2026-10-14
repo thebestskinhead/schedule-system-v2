@@ -1069,7 +1069,7 @@ POST /admin/members/:id/resend-invite
 Authorization: Bearer <token>
 ```
 
-**路径参数:** `id` - 待激活/过期/作废的邀请记录ID
+**路径参数:** `id` - 待激活用户ID（users 主键）
 
 **权限要求:** `user:manage`
 
@@ -1090,7 +1090,7 @@ POST /admin/members/:id/revoke
 Authorization: Bearer <token>
 ```
 
-**路径参数:** `id` - 待处理/过期的邀请记录ID
+**路径参数:** `id` - 待激活用户ID（users 主键）
 
 **权限要求:** `user:manage`
 
@@ -1720,7 +1720,7 @@ Authorization: Bearer <token>
     "password": "***",
     "from": "排班系统",
     "from_email": "noreply@example.com",
-    "use_tls": true,
+    "use_tls": false,
     "use_ssl": true,
     "is_active": true
   }

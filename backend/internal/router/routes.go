@@ -32,7 +32,7 @@ type Handlers struct {
 	SMTP         *handler.SMTPHandler
 	QRLogin      *handler.QRLoginHandler
 	Invitation   *handler.InvitationHandler
-	Application  *handler.ApplicationHandler // 可能为 nil（未安装时）
+	Application  *handler.ApplicationHandler
 }
 
 // buildRoutes 构建全部路由表（单一事实来源：接口 → 权限）
@@ -160,27 +160,25 @@ func buildRoutes(h *Handlers) []RouteDef {
 		{Method: "POST", Path: "/admin/site/config", Auth: true, Perms: []auth.Permission{auth.PermSystemAdmin}, Handler: h.SMTP.SaveSiteConfig},
 	}
 
-	// ========== 应用系统（申请/审批），仅安装后注册 ==========
-	if h.Application != nil {
-		routes = append(routes,
-			// 申请类型
-			RouteDef{Method: "GET", Path: "/application/types", Auth: true, Handler: h.Application.GetTypes},
-			RouteDef{Method: "GET", Path: "/application/permissions/available", Auth: true, Handler: h.Application.GetAvailablePermissions},
+	// ========== 应用系统（申请/审批） ==========
+	routes = append(routes,
+		// 申请类型
+		RouteDef{Method: "GET", Path: "/application/types", Auth: true, Handler: h.Application.GetTypes},
+		RouteDef{Method: "GET", Path: "/application/permissions/available", Auth: true, Handler: h.Application.GetAvailablePermissions},
 
-			// 我的申请
-			RouteDef{Method: "GET", Path: "/applications/my", Auth: true, Handler: h.Application.GetMyApplications},
-			RouteDef{Method: "POST", Path: "/applications", Auth: true, Handler: h.Application.Create},
-			RouteDef{Method: "GET", Path: "/applications/:id", Auth: true, Handler: h.Application.GetDetail},
-			RouteDef{Method: "POST", Path: "/applications/:id/cancel", Auth: true, Handler: h.Application.Cancel},
+		// 我的申请
+		RouteDef{Method: "GET", Path: "/applications/my", Auth: true, Handler: h.Application.GetMyApplications},
+		RouteDef{Method: "POST", Path: "/applications", Auth: true, Handler: h.Application.Create},
+		RouteDef{Method: "GET", Path: "/applications/:id", Auth: true, Handler: h.Application.GetDetail},
+		RouteDef{Method: "POST", Path: "/applications/:id/cancel", Auth: true, Handler: h.Application.Cancel},
 
-			// 待我审批
-			RouteDef{Method: "GET", Path: "/applications/pending", Auth: true, Handler: h.Application.GetPendingApprovals},
-			RouteDef{Method: "POST", Path: "/applications/:id/approve", Auth: true, Handler: h.Application.ProcessApproval},
+		// 待我审批
+		RouteDef{Method: "GET", Path: "/applications/pending", Auth: true, Handler: h.Application.GetPendingApprovals},
+		RouteDef{Method: "POST", Path: "/applications/:id/approve", Auth: true, Handler: h.Application.ProcessApproval},
 
-			// 申请统计
-			RouteDef{Method: "GET", Path: "/applications/stats", Auth: true, Handler: h.Application.GetStats},
-		)
-	}
+		// 申请统计
+		RouteDef{Method: "GET", Path: "/applications/stats", Auth: true, Handler: h.Application.GetStats},
+	)
 
 	return routes
 }

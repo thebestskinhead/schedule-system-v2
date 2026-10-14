@@ -47,7 +47,6 @@ backend/configs/config.yaml
 backend/configs/*.yaml
 !backend/configs/config.example.yaml
 !backend/configs/dev.example.yaml
-windows-release/config.yaml
 
 # Backend compiled binaries
 backend/server
@@ -66,11 +65,10 @@ backend/dist-mobile
 # Data exports
 v1-data/*.zip
 
-# Windows release
-windows-release/
-
 # Release output (entire folder)
 release/
+release-linux/
+release-windows/
 
 # Misc
 1.py
@@ -82,6 +80,7 @@ temp/
 # 本地项目数据与临时验证产物
 .workbuddy/
 .verify_test/
+outputs/
 
 # 待用户审批的删除归档（按次分子目录）
 _deleted/

@@ -118,7 +118,7 @@ func (h *SMTPHandler) TestEmail(c *gin.Context) {
 			UseSSL:    req.UseSSL,
 		}
 		if cfg.Port == 0 {
-			cfg.Port = 587
+			cfg.Port = 465
 		}
 		if cfg.From == "" {
 			cfg.From = "排班系统"

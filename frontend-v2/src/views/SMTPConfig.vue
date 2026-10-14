@@ -78,7 +78,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getSMTPConfig, saveSMTPConfig, testSMTPConfig, getSiteConfig, saveSiteConfig } from '../api/system'
 
@@ -90,9 +90,9 @@ const showTestDialog = ref(false)
 const form = reactive({
   id: null,
   host: '',
-  port: 587,
-  use_tls: true,
-  use_ssl: false,
+  port: 465,
+  use_tls: false,
+  use_ssl: true,
   username: '',
   password: '',
   from: '排班系统',
@@ -109,6 +109,17 @@ const encryptionType = computed({
   set: (val) => {
     form.use_ssl = val === 'ssl'
     form.use_tls = val === 'tls'
+  }
+})
+
+// 端口与加密方式联动：465 为隐式 SSL，587 为 STARTTLS
+watch(() => form.port, (port) => {
+  if (port === 465) {
+    form.use_ssl = true
+    form.use_tls = false
+  } else if (port === 587) {
+    form.use_ssl = false
+    form.use_tls = true
   }
 })
 
@@ -130,7 +141,7 @@ const loadConfig = async () => {
       Object.assign(form, {
         id: data.id || null,
         host: data.host || '',
-        port: data.port || 587,
+        port: data.port || 465,
         use_tls: data.use_tls !== undefined ? data.use_tls : true,
         use_ssl: data.use_ssl || false,
         username: data.username || '',

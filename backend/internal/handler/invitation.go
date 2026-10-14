@@ -72,7 +72,7 @@ func (h *InvitationHandler) BatchCreateMembers(c *gin.Context) {
 	utils.Success(c, result)
 }
 
-// ResendInvite 重发邀请（需 user:manage）
+// ResendInvite 重发邀请（需 user:manage）。路径参数为用户 ID。
 func (h *InvitationHandler) ResendInvite(c *gin.Context) {
 	checker := auth.GetChecker(c)
 	if !checker.HasPermission(auth.PermUserManage) {
@@ -93,7 +93,7 @@ func (h *InvitationHandler) ResendInvite(c *gin.Context) {
 	utils.Success(c, gin.H{"message": "邀请已重新发送"})
 }
 
-// RevokeInvite 作废邀请（需 user:manage）
+// RevokeInvite 作废邀请（需 user:manage）。路径参数为用户 ID。
 func (h *InvitationHandler) RevokeInvite(c *gin.Context) {
 	checker := auth.GetChecker(c)
 	if !checker.HasPermission(auth.PermUserManage) {

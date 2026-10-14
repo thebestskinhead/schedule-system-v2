@@ -87,7 +87,15 @@ CHARACTER SET utf8mb4
 COLLATE utf8mb4_unicode_ci;
 ```
 
-### 3️⃣ 后端启动
+### 3️⃣ 启动开发环境
+
+```powershell
+.\dev.ps1
+```
+
+脚本会同时拉起电脑端与移动端的前端开发服务器，并由后端以代理模式转发页面请求。
+
+若只需手动启动后端：
 
 ```bash
 cd backend
@@ -97,15 +105,7 @@ go mod download
 go run ./cmd/server/main.go
 ```
 
-### 4️⃣ 前端启动
-
-```bash
-cd frontend-v2
-npm install
-npm run dev
-```
-
-### 5️⃣ 访问系统
+### 4️⃣ 访问系统
 
 打开浏览器访问：
 - **电脑端**: `http://localhost:8080/`
@@ -229,18 +229,7 @@ docker-compose up -d
 
 ### 生产环境部署
 
-```bash
-# 构建前端
-cd frontend-v2
-npm run build
-
-# 构建后端
-cd ../backend
-go build -o server ./cmd/server/main.go
-
-# 运行
-./server
-```
+推送标签（形如 `v2.1.0`）触发发布流程，产出 Linux 与 Windows 整包，包含后端可执行文件与前后端全部资源。
 
 更多部署方式请参考 [BUILD.md](BUILD.md)
 

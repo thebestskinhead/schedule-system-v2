@@ -1,81 +1,39 @@
-# 构建说明
+# 构建与运行
 
-## 方式一：快速开发构建（推荐开发使用）
+## 开发运行
 
-```bash
-./dev-build.sh
+```powershell
+.\dev.ps1
 ```
 
-- 构建前端并复制到 `backend/dist/`
-- 启动后端即可访问完整系统
+在项目根目录执行。脚本会同时拉起电脑端与移动端的前端开发服务器，并由后端以代理模式转发页面请求，`/api` 由后端直接处理。
 
-```bash
-cd backend
-go run ./cmd/server/main.go
-```
+访问地址：
 
-访问 http://localhost:8080
+- 电脑端：http://localhost:8080/
+- 移动端：http://localhost:8080/mobile/
+
+修改前端代码后由 vite 热更新，无需重新构建。按 `Ctrl+C` 停止，前端开发服务器会一并关闭。
 
 ---
 
-## 方式二：全量构建（推荐生产部署）
+## 生产部署
+
+### 发布包构建
+
+推送标签（形如 `v2.1.0`）即触发发布流程，产出 Linux 与 Windows 两种整包并挂到 Release 页面。产物包含后端可执行文件、电脑端资源 `dist/`、移动端资源 `dist-mobile/`、数据库迁移脚本与启动脚本。
+
+### Docker 部署
 
 ```bash
-./build.sh [输出目录]
-```
-
-示例：
-```bash
-./build.sh ./release
-```
-
-输出目录结构：
-```
-release/
-├── server          # 后端可执行文件
-├── dist/           # 前端静态资源
-├── start.sh        # Linux/Mac 启动脚本
-├── start.bat       # Windows 启动脚本
-├── init_db.sql     # 数据库初始化脚本
-└── migrations/     # 数据库迁移文件
-```
-
-启动：
-```bash
-cd release
-./start.sh
-```
-
----
-
-## 方式三：Docker部署（推荐容器化部署）
-
-### 一键启动（包含MySQL）
-
-```bash
-# 1. 复制环境变量配置（可选，修改密码等）
-cp .env.example .env
-# 编辑 .env 修改 DB_PASSWORD 等配置
-
-# 2. 启动所有服务
+# 一键启动（含 MySQL）
 docker-compose up -d
 
-# 3. 查看日志
+# 查看日志
 docker-compose logs -f app
 ```
 
-访问 http://localhost:8080 ，首次使用需要完成安装向导。
-
-### 自定义配置
-
-在 `.env` 文件中修改：
-
-```bash
-DB_PASSWORD=your_password    # MySQL root 密码
-DB_NAME=schedule_system_v2  # 数据库名
-DB_PORT=3306                # MySQL 映射端口
-APP_PORT=8080               # 应用映射端口
-```
+在 `.env` 文件中可修改 `DB_PASSWORD`、`DB_NAME`、`DB_PORT`、`APP_PORT`。
 
 ### 单独构建镜像
 
@@ -107,26 +65,6 @@ docker-compose ps
 
 ---
 
-## 方式四：前后端分离部署
-
-### 前端单独部署
-```bash
-cd frontend-v2
-npm run build
-# 将 dist/ 目录部署到Nginx或CDN
-```
-
-### 后端单独部署
-```bash
-cd backend
-go build -o server ./cmd/server/main.go
-./server
-```
-
-后端API地址：http://localhost:8080/api/v1/
-
----
-
 ## 环境变量配置
 
 | 变量名 | 说明 | 默认值 |
@@ -140,11 +78,10 @@ go build -o server ./cmd/server/main.go
 
 ---
 
-## 推荐选择
+## 数据库迁移
 
-| 场景 | 推荐方式 |
-|------|----------|
-| 本地开发 | 方式一：dev-build.sh |
-| 单机部署 | 方式二：build.sh |
-| 生产环境 | 方式三：Docker |
-| 大型部署 | 方式四：前后端分离 + Nginx |
+```bash
+./migrate.sh
+```
+
+执行前自动将受影响表备份到 `backup/<日期>/`，备份失败即中止。

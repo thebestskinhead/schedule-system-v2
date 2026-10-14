@@ -16,11 +16,12 @@ let systemSettings = {
 // SMTP配置缓存
 let smtpConfig = {
   host: '',
-  port: 587,
+  port: 465,
   username: '',
   password: '',
   sender: '',
-  use_tls: true
+  use_tls: false,
+  use_ssl: true
 }
 
 // 站点配置缓存
