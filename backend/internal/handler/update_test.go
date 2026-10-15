@@ -161,8 +161,14 @@ func TestCheckUpdateSameMajor(t *testing.T) {
 	if data["current"] != "v3.0.0" || data["target"] != "v3.0.1" {
 		t.Errorf("current/target = %v/%v, want v3.0.0/v3.0.1", data["current"], data["target"])
 	}
-	if data["assetSize"] != float64(1024) {
-		t.Errorf("assetSize = %v, want 1024", data["assetSize"])
+	// 体积按平台取值（mock: windows zip=1024 / linux tar.gz=2048），
+	// 否则在 Linux CI 上会因选中 tar.gz 而断言失败
+	wantSize := float64(1024)
+	if update.PlatformAssetName() != "schedule-system-v2-windows-amd64.zip" {
+		wantSize = 2048
+	}
+	if data["assetSize"] != wantSize {
+		t.Errorf("assetSize = %v, want %v", data["assetSize"], wantSize)
 	}
 }
 
