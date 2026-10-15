@@ -23,6 +23,7 @@ type RouteDef struct {
 // Handlers 聚合所有 handler 实例
 type Handlers struct {
 	System       *handler.SystemHandler
+	Update       *handler.UpdateHandler
 	User         *handler.UserHandler
 	Availability *handler.AvailabilityHandler
 	Schedule     *handler.ScheduleHandler
@@ -40,6 +41,8 @@ func buildRoutes(h *Handlers) []RouteDef {
 	routes := []RouteDef{
 		// ========== 公开 API（无需认证） ==========
 		{Method: "GET", Path: "/system/installed", Handler: h.System.GetInstallStatus},
+		{Method: "GET", Path: "/system/version", Handler: h.Update.GetVersion},
+		{Method: "GET", Path: "/system/health", Handler: h.Update.HealthCheck},
 		{Method: "POST", Path: "/system/test-db", Handler: h.System.TestDBConnection},
 		{Method: "POST", Path: "/system/check-db", Handler: h.System.CheckDatabase},
 		{Method: "POST", Path: "/system/init-tables", Handler: h.System.InitDatabaseTables},
@@ -158,7 +161,13 @@ func buildRoutes(h *Handlers) []RouteDef {
 		{Method: "POST", Path: "/admin/smtp/test", Auth: true, Perms: []auth.Permission{auth.PermSystemAdmin}, Handler: h.SMTP.TestEmail},
 		{Method: "GET", Path: "/admin/site/config", Auth: true, Perms: []auth.Permission{auth.PermSystemAdmin}, Handler: h.SMTP.GetSiteConfig},
 		{Method: "POST", Path: "/admin/site/config", Auth: true, Perms: []auth.Permission{auth.PermSystemAdmin}, Handler: h.SMTP.SaveSiteConfig},
-	}
+
+		// ========== 热更新（系统管理员） ==========
+		{Method: "GET", Path: "/admin/update/check", Auth: true, Perms: []auth.Permission{auth.PermSystemAdmin}, Handler: h.Update.CheckUpdate},
+		{Method: "POST", Path: "/admin/update/start", Auth: true, Perms: []auth.Permission{auth.PermSystemAdmin}, Handler: h.Update.StartUpdate},
+		{Method: "GET", Path: "/admin/update/status", Auth: true, Perms: []auth.Permission{auth.PermSystemAdmin}, Handler: h.Update.GetUpdateStatus},
+		{Method: "GET", Path: "/admin/update/log", Auth: true, Perms: []auth.Permission{auth.PermSystemAdmin}, Handler: h.Update.UpdateLogTail},
+		}
 
 	// ========== 应用系统（申请/审批） ==========
 	routes = append(routes,

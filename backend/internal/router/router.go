@@ -87,6 +87,7 @@ func SetupRouter() *gin.Engine {
 	// 初始化服务和 Handler
 	handlers := &Handlers{
 		System:       handler.NewSystemHandler(),
+		Update:       handler.NewUpdateHandler(),
 		User:         handler.NewUserHandler(),
 		Availability: handler.NewAvailabilityHandler(),
 		Schedule:     handler.NewScheduleHandler(),

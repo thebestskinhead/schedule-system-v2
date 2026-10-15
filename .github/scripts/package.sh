@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # 组装发布包目录结构。由 CI 调用，TARGET 取 linux 或 windows。
-#   linux   -> release-linux/    (server + dist + dist-mobile + migrations + 启动脚本)
-#   windows -> release-windows/  (server.exe + dist + dist-mobile + migrations + 启动脚本)
+#   linux   -> release-linux/    (server + update + dist + dist-mobile + migrations + 启动脚本)
+#   windows -> release-windows/  (server.exe + update.exe + dist + dist-mobile + migrations + 启动脚本)
+# 说明：VERSION 传入本次发布的版本号（如 v3.1.0），写入 version.txt 供热更新比对。
 set -euo pipefail
 
 TARGET="${TARGET:?TARGET 必须为 linux 或 windows}"
+VERSION="${VERSION:-dev}"
 
 case "$TARGET" in
   linux)
@@ -15,6 +17,10 @@ case "$TARGET" in
     cp backend/scripts/init_db.sql "$PKG/"
     cp backend/migrations/*.sql "$PKG/migrations/" 2>/dev/null || true
     chmod +x "$PKG/server"
+
+    # 热更新程序（由 CI 直接构建到本目录，与 server 同级，供管理端「系统更新」或手动 ./update 调用）
+    [ -f "$PKG/update" ] && chmod +x "$PKG/update"
+    echo "$VERSION" > "$PKG/version.txt"
 
     cat > "$PKG/start.sh" <<'EOF'
 #!/bin/bash
@@ -48,10 +54,19 @@ EOF
 
 【目录说明】
 - server          后端可执行文件
+- update          热更新程序（同大版本升级用，通常由管理端页面自动调用）
 - dist/           电脑端前端资源
 - dist-mobile/    移动端前端资源
 - migrations/     数据库迁移脚本
 - init_db.sql     数据库初始化脚本
+- version.txt     当前版本号（热更新据此判断是否有新版本）
+
+【热更新】
+登录管理员账号后进入「系统管理 / SMTP 配置」页的「系统更新」卡片：
+- 检查更新：查询 GitHub Release 中同大版本的新版本
+- 立即更新：自动停止服务 -> 下载 -> 备份 -> 替换产物 -> 重启服务，
+  期间 http://localhost:8080 显示更新进度页，可随时终止并恢复旧版本
+- 跨大版本更新可能包含数据库结构变更，需手动下载整包升级
 EOF
     ;;
 
@@ -62,6 +77,9 @@ EOF
     cp -r frontend-mobile/dist/. "$PKG/dist-mobile/"
     cp backend/scripts/init_db.sql "$PKG/"
     cp backend/migrations/*.sql "$PKG/migrations/" 2>/dev/null || true
+
+    # 热更新程序（由 CI 直接构建到本目录，与 server.exe 同级）
+    echo "$VERSION" > "$PKG/version.txt"
 
     cat > "$PKG/启动.bat" <<'EOF'
 @echo off
@@ -92,10 +110,19 @@ EOF
 
 【目录说明】
 - server.exe      后端可执行文件
+- update.exe      热更新程序（同大版本升级用，通常由管理端页面自动调用）
 - dist/           电脑端前端资源
 - dist-mobile/    移动端前端资源
 - migrations/     数据库迁移脚本
 - init_db.sql     数据库初始化脚本
+- version.txt     当前版本号（热更新据此判断是否有新版本）
+
+【热更新】
+登录管理员账号后进入「系统管理 / SMTP 配置」页的「系统更新」卡片：
+- 检查更新：查询 GitHub Release 中同大版本的新版本
+- 立即更新：自动停止服务 -> 下载 -> 备份 -> 替换产物 -> 重启服务，
+  期间 http://localhost:8080 显示更新进度页，可随时终止并恢复旧版本
+- 跨大版本更新可能包含数据库结构变更，需手动下载整包升级
 EOF
     ;;
 

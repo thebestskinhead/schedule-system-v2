@@ -36,3 +36,10 @@ export const getPermissionList = () => request.get('/permissions/list')
 
 // 部门列表
 export const getDepartments = () => request.get('/departments')
+
+// 系统版本与热更新
+export const getVersion = () => request.get('/system/version')
+export const checkUpdate = () => request.get('/admin/update/check')
+export const startUpdate = () => request.post('/admin/update/start')
+export const getUpdateStatus = () => request.get('/admin/update/status')
+export const getUpdateLog = () => request.get('/admin/update/log')
