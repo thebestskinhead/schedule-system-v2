@@ -275,6 +275,10 @@ func (s *QRLoginService) Poll(sessionID string) *model.QRPollResponse {
 			}
 			session.SetResult(model.QRStatusSuccess, "登录成功")
 			session.ExpiresAt = time.Now().Add(30 * time.Second)
+
+			// 缓存教务会话，供课表导入等服务复用（2 小时内无需重复扫码）
+			GetEduSessionCache().Put(userInfo.StudentID, session.CookieJar)
+
 			return &model.QRPollResponse{
 				Status: model.QRStatusSuccess,
 				Token:  session.Token,
@@ -540,6 +544,7 @@ func (s *QRLoginService) startCleanupTicker() {
 			return
 		case <-ticker.C:
 			s.cleanupExpired()
+			GetEduSessionCache().cleanup()
 		}
 	}
 }

@@ -135,6 +135,18 @@
       </template>
     </el-dialog>
 
+    <!-- 扫码登录教务系统（用于课表导入） -->
+    <el-dialog v-model="qrVisible" title="扫码登录教务系统" width="380px" @close="closeQrDialog">
+      <div class="qr-import-body">
+        <div v-if="qrCode" class="qr-import-img-wrap">
+          <img :src="qrCode" alt="二维码" class="qr-import-img" />
+        </div>
+        <el-icon v-else class="qr-import-loading"><Loading /></el-icon>
+        <p class="qr-import-tip">{{ qrStatusText }}</p>
+        <p class="qr-import-sub">登录信息仅用于导入课表，2 小时内有效</p>
+      </div>
+    </el-dialog>
+
     <!-- 导入结果 -->
     <el-dialog v-model="showImportResult" title="导入结果" width="400px">
       <el-result
@@ -156,15 +168,123 @@
 import { ref, reactive, onMounted, computed, onUnmounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getMyAvailability, addAvailability, deleteAvailability, importFromXLS } from '../api/availability'
-import { getImportStatus } from '../api/crawler'
+import { getImportStatus, importFromEdu, resumeEduImport } from '../api/crawler'
+import { qrLoginStart, qrLoginPoll } from '../api/user'
 import { getCurrentWeek } from '../api/schedule'
 
 const loading = ref(false)
 const availabilityList = ref([])
 
-// 从教务系统导入（仅手机端支持）
-const handleSchoolImport = () => {
-  ElMessage.info('该功能仅限手机端使用')
+// 从教务系统导入
+const handleSchoolImport = async () => {
+  if (isImporting.value) return
+  try {
+    const data = await importFromEdu()
+    currentTask.value = { id: data.task_id, ...data }
+
+    if (data.need_login) {
+      // 无可用教务登录会话：引导扫码，扫码成功后继续导入
+      currentTask.value.id = data.task_id
+      openQrDialog(data.task_id)
+      return
+    }
+
+    isImporting.value = true
+    taskStatus.value = data.status || 'pending'
+    taskProgress.value = 10
+    taskDetail.value = data.message || '任务已提交，正在导入中...'
+    ElMessage.success('任务已提交，正在导入中...')
+    startStatusPolling()
+  } catch (error) {
+    ElMessage.error(error.message || '发起导入失败')
+  }
+}
+
+// 扫码登录教务系统（仅用于课表导入）
+const qrVisible = ref(false)
+const qrCode = ref('')
+const qrStatus = ref('pending')
+const qrMessage = ref('')
+const qrSessionId = ref('')
+const qrTaskId = ref('')
+let qrPollTimer = null
+
+const qrStatusText = computed(() => {
+  const map = {
+    pending: '请使用微信扫描二维码',
+    scanned: '已扫码，请在手机上确认',
+    confirmed: '正在登录教务系统...'
+  }
+  return map[qrStatus.value] || qrMessage.value
+})
+
+function openQrDialog(taskId) {
+  qrTaskId.value = taskId
+  qrVisible.value = true
+  qrStatus.value = 'pending'
+  qrMessage.value = ''
+  qrCode.value = ''
+  startQrLogin()
+}
+
+const startQrLogin = async () => {
+  try {
+    const res = await qrLoginStart()
+    qrSessionId.value = res.session_id
+    qrCode.value = res.qrcode
+    qrStatus.value = 'pending'
+    qrPollTimer = setTimeout(pollQr, 2000)
+  } catch (error) {
+    qrStatus.value = 'error'
+    qrMessage.value = error.message || '获取二维码失败'
+  }
+}
+
+const pollQr = async () => {
+  if (!qrSessionId.value) return
+  try {
+    const res = await qrLoginPoll({ session_id: qrSessionId.value })
+    if (res.status === 'success') {
+      qrStatus.value = 'confirmed'
+      qrPollTimer = null
+      // 扫码成功，教务会话已缓存，继续导入
+      qrVisible.value = false
+      await resumeAfterLogin()
+      return
+    }
+    if (res.status === 'expired' || res.status === 'error') {
+      qrStatus.value = res.status
+      qrMessage.value = res.message || '扫码失败'
+      return
+    }
+    qrStatus.value = res.status
+    qrMessage.value = res.message || ''
+    qrPollTimer = setTimeout(pollQr, 2000)
+  } catch (error) {
+    qrPollTimer = setTimeout(pollQr, 2000)
+  }
+}
+
+async function resumeAfterLogin() {
+  try {
+    await resumeEduImport(qrTaskId.value)
+    isImporting.value = true
+    taskStatus.value = 'pending'
+    taskProgress.value = 10
+    taskDetail.value = '登录成功，正在导入课表...'
+    ElMessage.success('登录成功，正在导入课表...')
+    startStatusPolling()
+  } catch (error) {
+    ElMessage.error(error.message || '继续导入失败')
+    isImporting.value = false
+  }
+}
+
+function closeQrDialog() {
+  clearTimeout(qrPollTimer)
+  qrPollTimer = null
+  qrVisible.value = false
+  currentTask.value = null
 }
 
 // XLS上传相关
@@ -407,6 +527,11 @@ const checkTaskStatus = async () => {
     if (data.status === 'pending') {
       taskProgress.value = 10
       taskDetail.value = '任务排队中，请稍候...'
+    } else if (data.status === 'waiting_login') {
+      // 执行中发现教务会话失效：停止轮询并重新引导扫码
+      clearInterval(statusPollTimer)
+      isImporting.value = false
+      openQrDialog(currentTask.value.id)
     } else if (data.status === 'running') {
       taskProgress.value = 50
       taskDetail.value = '正在爬取课表数据...'
@@ -528,6 +653,9 @@ onMounted(() => {
 onUnmounted(() => {
   if (statusPollTimer) {
     clearInterval(statusPollTimer)
+  }
+  if (qrPollTimer) {
+    clearTimeout(qrPollTimer)
   }
 })
 </script>
@@ -741,5 +869,53 @@ onUnmounted(() => {
 
 .mb-4 {
   margin-bottom: 16px;
+}
+
+/* 扫码登录教务系统 */
+.qr-import-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0 4px;
+}
+
+.qr-import-img-wrap {
+  width: 200px;
+  height: 200px;
+  padding: 8px;
+  box-sizing: border-box;
+  background: #fff;
+  border: 1px solid #ebeef5;
+  border-radius: 12px;
+}
+
+.qr-import-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.qr-import-loading {
+  width: 200px;
+  height: 200px;
+  font-size: 32px;
+  color: #c0c4cc;
+  animation: qrImportSpin 1s linear infinite;
+}
+
+@keyframes qrImportSpin {
+  to { transform: rotate(360deg); }
+}
+
+.qr-import-tip {
+  margin: 16px 0 4px;
+  font-size: 14px;
+  color: #303133;
+}
+
+.qr-import-sub {
+  margin: 0;
+  font-size: 12px;
+  color: #909399;
 }
 </style>

@@ -3,8 +3,11 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,10 +19,11 @@ import (
 type TaskStatus string
 
 const (
-	TaskStatusPending   TaskStatus = "pending"   // 排队中
-	TaskStatusRunning   TaskStatus = "running"   // 执行中
-	TaskStatusCompleted TaskStatus = "completed" // 已完成
-	TaskStatusFailed    TaskStatus = "failed"    // 失败
+	TaskStatusPending      TaskStatus = "pending"       // 排队中
+	TaskStatusRunning      TaskStatus = "running"       // 执行中
+	TaskStatusWaitingLogin TaskStatus = "waiting_login" // 等待用户扫码登录教务系统
+	TaskStatusCompleted    TaskStatus = "completed"     // 已完成
+	TaskStatusFailed       TaskStatus = "failed"        // 失败
 )
 
 // ImportType 导入类型
@@ -28,6 +32,7 @@ type ImportType string
 const (
 	ImportTypeExcel  ImportType = "excel"  // Excel文件导入
 	ImportTypeManual ImportType = "manual" // 手动录入
+	ImportTypeEdu    ImportType = "edu"    // 从教务系统下载导入
 )
 
 // ImportTask 通用导入任务
@@ -46,6 +51,9 @@ type ImportTask struct {
 
 	// Excel导入参数
 	FilePath string `json:"-"` // 临时文件路径
+
+	// 教务导入参数
+	StudentID string `json:"-"` // 教务学号，用于取缓存的登录会话
 
 	// 手动录入参数
 	Availabilities []model.Availability `json:"-"`
@@ -179,10 +187,74 @@ func (q *TaskQueue) SubmitManualTask(userID int, weekday, period int, weeks []in
 	return q.enqueueTaskLocked(task)
 }
 
+// SubmitEduTask 提交教务系统导入任务。
+// 若已有缓存中的教务登录会话则直接入队执行；否则任务置为等待登录状态，
+// 由前端引导用户扫码，扫码成功后再调用 ResumeEduTask 继续。
+func (q *TaskQueue) SubmitEduTask(userID int, studentID string) (*ImportTask, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if q.stopped {
+		return nil, fmt.Errorf("任务队列已停止")
+	}
+
+	if q.hasRunningTaskLocked(userID) {
+		return nil, fmt.Errorf("已有进行中的导入任务")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	task := &ImportTask{
+		ID:         generateTaskID(),
+		Type:       ImportTypeEdu,
+		UserID:     userID,
+		StudentID:  studentID,
+		Status:     TaskStatusPending,
+		CreatedAt:  time.Now(),
+		MaxRetries: 1,
+		ctx:        ctx,
+		cancel:     cancel,
+	}
+
+	if GetEduSessionCache().Get(studentID) == nil {
+		// 无可用登录会话：等待用户扫码，任务暂不出队
+		task.Status = TaskStatusWaitingLogin
+		q.tasks[task.ID] = task
+		return task, nil
+	}
+
+	return q.enqueueTaskLocked(task)
+}
+
+// ResumeEduTask 扫码登录成功后继续执行等待中的教务导入任务。
+func (q *TaskQueue) ResumeEduTask(taskID string) (*ImportTask, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	task, ok := q.tasks[taskID]
+	if !ok {
+		return nil, fmt.Errorf("任务不存在")
+	}
+	if task.Type != ImportTypeEdu {
+		return nil, fmt.Errorf("任务类型不匹配")
+	}
+	if task.Status != TaskStatusWaitingLogin {
+		return nil, fmt.Errorf("任务不处于等待登录状态")
+	}
+
+	task.Status = TaskStatusPending
+	task.Error = ""
+	// 等待登录期间原上下文可能已过期，重建执行上下文
+	if task.cancel != nil {
+		task.cancel()
+	}
+	task.ctx, task.cancel = context.WithTimeout(context.Background(), 5*time.Minute)
+	return q.enqueueTaskLocked(task)
+}
+
 // hasRunningTaskLocked 检查用户是否有进行中的任务（调用前需持有锁）
 func (q *TaskQueue) hasRunningTaskLocked(userID int) bool {
 	for _, task := range q.tasks {
-		if task.UserID == userID && (task.Status == TaskStatusPending || task.Status == TaskStatusRunning) {
+		if task.UserID == userID && (task.Status == TaskStatusPending || task.Status == TaskStatusRunning || task.Status == TaskStatusWaitingLogin) {
 			return true
 		}
 	}
@@ -276,6 +348,8 @@ func (q *TaskQueue) processTask(task *ImportTask) {
 		result, err = q.executeExcelImport(task)
 	case ImportTypeManual:
 		result, err = q.executeManualImport(task)
+	case ImportTypeEdu:
+		result, err = q.executeEduImport(task)
 	default:
 		err = fmt.Errorf("未知的任务类型: %s", task.Type)
 	}
@@ -283,6 +357,11 @@ func (q *TaskQueue) processTask(task *ImportTask) {
 	// 更新任务状态
 	q.mu.Lock()
 	defer q.mu.Unlock()
+
+	// 等待登录：保留状态与上下文，待用户扫码后由 ResumeEduTask 重新入队
+	if task.Status == TaskStatusWaitingLogin {
+		return
+	}
 
 	finishTime := time.Now()
 	task.FinishedAt = &finishTime
@@ -333,6 +412,51 @@ func (q *TaskQueue) executeExcelImport(task *ImportTask) (*ImportResult, error) 
 	}
 
 	return nil, fmt.Errorf("重试%d次后失败: %w", task.MaxRetries, lastErr)
+}
+
+// executeEduImport 执行教务系统导入：取缓存会话下载课表，落临时文件后复用 Excel 导入流程。
+func (q *TaskQueue) executeEduImport(task *ImportTask) (*ImportResult, error) {
+	jar := GetEduSessionCache().Get(task.StudentID)
+	if jar == nil {
+		// 会话缺失或已失效：清掉缓存，转为等待登录
+		GetEduSessionCache().Delete(task.StudentID)
+		q.mu.Lock()
+		task.Status = TaskStatusWaitingLogin
+		task.Error = "教务登录已失效，请重新扫码登录"
+		q.mu.Unlock()
+		return nil, fmt.Errorf("教务登录已失效，请重新扫码登录")
+	}
+
+	select {
+	case <-task.ctx.Done():
+		return nil, fmt.Errorf("任务超时或取消")
+	default:
+	}
+
+	data, filename, err := NewEduTimetableService().Download(jar)
+	if err != nil {
+		if errors.Is(err, ErrEduSessionInvalid) {
+			GetEduSessionCache().Delete(task.StudentID)
+			q.mu.Lock()
+			task.Status = TaskStatusWaitingLogin
+			task.Error = "教务登录已失效，请重新扫码登录"
+			q.mu.Unlock()
+		}
+		return nil, err
+	}
+
+	// 写入临时文件，复用现有 Excel 解析与落库流程
+	ext := ".xls"
+	if strings.HasSuffix(strings.ToLower(filename), ".xlsx") {
+		ext = ".xlsx"
+	}
+	tempPath := filepath.Join(os.TempDir(), fmt.Sprintf("edu_%d_%d%s", task.UserID, time.Now().UnixNano(), ext))
+	if err := os.WriteFile(tempPath, data, 0644); err != nil {
+		return nil, fmt.Errorf("写入课表文件失败: %w", err)
+	}
+
+	task.FilePath = tempPath
+	return q.doExcelImport(task)
 }
 
 // doExcelImport 实际执行Excel导入

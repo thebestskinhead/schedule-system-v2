@@ -150,6 +150,84 @@ func (h *AvailabilityHandler) GetImportTaskList(c *gin.Context) {
 	})
 }
 
+// ImportFromEdu 从教务系统导入课表（异步队列模式）。
+// 若缓存中已有该用户的教务登录会话则直接执行；否则任务进入等待登录状态，
+// 前端据 need_login 引导用户扫码，扫码成功后调用 ResumeEduImport 继续。
+func (h *AvailabilityHandler) ImportFromEdu(c *gin.Context) {
+	userID := auth.GetUserIDFromContext(c)
+	if userID == 0 {
+		auth.ResponseUnauthorized(c)
+		return
+	}
+	studentID := auth.GetStudentIDFromContext(c)
+	if studentID == "" {
+		utils.Error(c, http.StatusBadRequest, "无法识别当前用户学号")
+		return
+	}
+
+	queue := service.GetTaskQueue()
+	task, err := queue.SubmitEduTask(userID, studentID)
+	if err != nil {
+		utils.Error(c, http.StatusTooManyRequests, err.Error())
+		return
+	}
+
+	utils.Success(c, gin.H{
+		"task_id":    task.ID,
+		"status":     task.Status,
+		"need_login": task.Status == service.TaskStatusWaitingLogin,
+		"message":    eduTaskMessage(task.Status),
+	})
+}
+
+// ResumeEduImport 扫码登录成功后继续执行等待中的教务导入任务。
+func (h *AvailabilityHandler) ResumeEduImport(c *gin.Context) {
+	userID := auth.GetUserIDFromContext(c)
+	if userID == 0 {
+		auth.ResponseUnauthorized(c)
+		return
+	}
+
+	var req struct {
+		TaskID string `json:"task_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.Error(c, http.StatusBadRequest, "参数错误: "+err.Error())
+		return
+	}
+
+	queue := service.GetTaskQueue()
+
+	// 校验任务归属，防止越权续跑他人任务
+	task, ok := queue.GetTask(req.TaskID)
+	if !ok || task.UserID != userID {
+		utils.Error(c, http.StatusForbidden, "无权操作此任务")
+		return
+	}
+
+	resumed, err := queue.ResumeEduTask(req.TaskID)
+	if err != nil {
+		utils.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	utils.Success(c, gin.H{
+		"task_id": resumed.ID,
+		"status":  resumed.Status,
+		"message": "已开始导入",
+	})
+}
+
+// eduTaskMessage 将任务状态转为面向用户的提示
+func eduTaskMessage(status service.TaskStatus) string {
+	switch status {
+	case service.TaskStatusWaitingLogin:
+		return "请扫码登录教务系统后继续导入"
+	default:
+		return "任务已提交，正在导入中"
+	}
+}
+
 // ImportFromXLS 从XLS文件导入课表（异步队列模式）
 func (h *AvailabilityHandler) ImportFromXLS(c *gin.Context) {
 	userID := auth.GetUserIDFromContext(c)
