@@ -11,3 +11,6 @@ export const importFromEdu = () => request.post('/availability/import/edu')
 
 // 扫码登录教务系统后继续导入
 export const resumeEduImport = (taskId) => request.post('/availability/import/edu/resume', { task_id: taskId })
+
+// 取消导入任务
+export const cancelImport = (taskId) => request.post('/availability/import/cancel', { task_id: taskId })

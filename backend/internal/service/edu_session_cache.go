@@ -1,9 +1,11 @@
 package service
 
 import (
+	"log"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -53,14 +55,17 @@ func GetEduSessionCache() *EduSessionCache {
 }
 
 // Put 缓存指定学号的教务会话，从 CookieJar 中抽取教务站 Cookie。
+//
+// 教务的 Cookie 分布在多个路径下，而 Cookie 是否随请求发送由其 Path 决定。
+// 这里按课表导入实际访问的 URL 逐一遍历汇总，避免遗漏深层路径下的鉴权 Cookie。
 func (c *EduSessionCache) Put(studentID string, jar *cookiejar.Jar) {
 	if studentID == "" || jar == nil {
 		return
 	}
 
-	eduURL, _ := url.Parse(eduBaseURL)
-	cookies := jar.Cookies(eduURL)
+	cookies := collectEduCookies(jar)
 	if len(cookies) == 0 {
+		log.Printf("[edu-session] 学号 %s 的教务会话未发现任何 Cookie，跳过缓存", studentID)
 		return
 	}
 
@@ -84,6 +89,34 @@ func (c *EduSessionCache) Put(studentID string, jar *cookiejar.Jar) {
 		ExpiresAt: time.Now().Add(eduSessionTTL),
 	}
 	c.mu.Unlock()
+
+	names := make([]string, 0, len(serialized))
+	for _, ck := range serialized {
+		names = append(names, ck.Name)
+	}
+	log.Printf("[edu-session] 已缓存学号 %s 的教务会话，共 %d 枚 Cookie: %s", studentID, len(serialized), strings.Join(names, ","))
+}
+
+// collectEduCookies 汇总教务各业务页面会携带的 Cookie 并按 名称+域+路径 去重。
+// 仅取根路径会漏掉深层路径下发的鉴权 Cookie，故按实际访问地址逐一遍历。
+func collectEduCookies(jar *cookiejar.Jar) []*http.Cookie {
+	seen := make(map[string]bool)
+	var out []*http.Cookie
+	for _, raw := range []string{eduBaseURL, eduTimetableListURL, eduTimetablePrintURL} {
+		u, err := url.Parse(raw)
+		if err != nil {
+			continue
+		}
+		for _, ck := range jar.Cookies(u) {
+			key := ck.Name + "\x00" + ck.Domain + "\x00" + ck.Path
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, ck)
+		}
+	}
+	return out
 }
 
 // Get 取出指定学号的可用会话，返回重建的 CookieJar。未命中或已过期返回 nil。

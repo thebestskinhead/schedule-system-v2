@@ -1,10 +1,13 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -45,22 +48,30 @@ func NewEduTimetableService() *EduTimetableService {
 }
 
 // Download 用给定 Cookie 下载当前学期课表，返回文件字节与服务端文件名。
-// 会话失效时返回 ErrEduSessionInvalid。
-func (s *EduTimetableService) Download(jar *cookiejar.Jar) ([]byte, string, error) {
+// 会话失效时返回 ErrEduSessionInvalid；ctx 用于中断阻塞的网络请求。
+func (s *EduTimetableService) Download(ctx context.Context, jar *cookiejar.Jar) ([]byte, string, error) {
 	client := newEduClient(jar)
 
-	term, err := s.detectCurrentTerm(client)
+	if u, err := url.Parse(eduTimetableListURL); err == nil {
+		names := make([]string, 0, 8)
+		for _, ck := range jar.Cookies(u) {
+			names = append(names, ck.Name)
+		}
+		log.Printf("[edu-timetable] 请求课表页将携带 %d 枚 Cookie: %s", len(names), strings.Join(names, ","))
+	}
+
+	term, err := s.detectCurrentTerm(ctx, client)
 	if err != nil {
 		return nil, "", err
 	}
 
-	return s.fetchTimetable(client, term)
+	return s.fetchTimetable(ctx, client, term)
 }
 
 // detectCurrentTerm 读课表列表页，取学年学期下拉框中 selected 的选项。
 // 该选中项由服务端按当前日期判定，且并非列表首项，必须读 selected。
-func (s *EduTimetableService) detectCurrentTerm(client *http.Client) (string, error) {
-	req, _ := http.NewRequest("GET", eduTimetableListURL, nil)
+func (s *EduTimetableService) detectCurrentTerm(ctx context.Context, client *http.Client) (string, error) {
+	req, _ := http.NewRequestWithContext(ctx, "GET", eduTimetableListURL, nil)
 	commonHeaders(req)
 
 	resp, err := client.Do(req)
@@ -76,6 +87,12 @@ func (s *EduTimetableService) detectCurrentTerm(client *http.Client) (string, er
 
 	term := extractSelectedTerm(string(body))
 	if term == "" {
+		head := body
+		if len(head) > 120 {
+			head = head[:120]
+		}
+		log.Printf("[edu-timetable] 课表页未取到当前学期: status=%d 字节数=%d 头部=%q",
+			resp.StatusCode, len(body), strings.ReplaceAll(string(head), "\n", " "))
 		return "", ErrEduSessionInvalid
 	}
 	return term, nil
@@ -104,8 +121,8 @@ func extractSelectedTerm(html string) string {
 }
 
 // fetchTimetable 提交导出请求，取回课表文件。
-func (s *EduTimetableService) fetchTimetable(client *http.Client, term string) ([]byte, string, error) {
-	req, _ := http.NewRequest("POST", eduTimetablePrintURL, nil)
+func (s *EduTimetableService) fetchTimetable(ctx context.Context, client *http.Client, term string) ([]byte, string, error) {
+	req, _ := http.NewRequestWithContext(ctx, "POST", eduTimetablePrintURL, nil)
 	commonHeaders(req)
 	req.Header.Set("Referer", eduTimetableListURL)
 
@@ -129,6 +146,12 @@ func (s *EduTimetableService) fetchTimetable(client *http.Client, term string) (
 
 	if !isExcelResponse(resp.Header.Get("Content-Type"), body) {
 		// 会话失效时服务端返回登录页 HTML 且状态码仍为 200
+		head := body
+		if len(head) > 120 {
+			head = head[:120]
+		}
+		log.Printf("[edu-timetable] 导出响应不是课表文件: status=%d content-type=%q 字节数=%d 头部=%q",
+			resp.StatusCode, resp.Header.Get("Content-Type"), len(body), strings.ReplaceAll(string(head), "\n", " "))
 		return nil, "", ErrEduSessionInvalid
 	}
 

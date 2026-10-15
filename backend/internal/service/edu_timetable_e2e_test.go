@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -29,7 +30,7 @@ func TestEduDownloadE2E(t *testing.T) {
 		jar.SetCookies(eduURL, []*http.Cookie{{Name: pair[0], Value: pair[1], Path: "/"}})
 	}
 
-	data, filename, err := NewEduTimetableService().Download(jar)
+	data, filename, err := NewEduTimetableService().Download(context.Background(), jar)
 	if err != nil {
 		t.Fatalf("下载失败: %v", err)
 	}

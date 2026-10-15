@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"schedule-system-v2/backend/internal/db"
@@ -24,6 +25,15 @@ const (
 	TaskStatusWaitingLogin TaskStatus = "waiting_login" // 等待用户扫码登录教务系统
 	TaskStatusCompleted    TaskStatus = "completed"     // 已完成
 	TaskStatusFailed       TaskStatus = "failed"        // 失败
+	TaskStatusCancelled    TaskStatus = "cancelled"     // 已取消
+)
+
+// 任务生命周期参数。执行类超时用于兜住卡死，避免任务与并发槽位被永久占用。
+const (
+	taskExecTimeout   = 2 * time.Minute  // 排队与执行的最长耗时，超时判失败
+	waitingLoginTTL   = 2 * time.Minute  // 等待扫码登录的最长时长
+	taskRetention     = 24 * time.Hour   // 终态任务的保留时长
+	taskSweepInterval = 20 * time.Second // 过期任务扫描间隔
 )
 
 // ImportType 导入类型
@@ -91,8 +101,25 @@ var (
 func GetTaskQueue() *TaskQueue {
 	queueOnce.Do(func() {
 		queueInstance = NewTaskQueue(5, 200) // 5个并发工作者，队列长度200
+		queueInstance.StartCleanup()
 	})
 	return queueInstance
+}
+
+// StartCleanup 启动后台清理协程，周期回收超时任务与过期终态任务。
+func (q *TaskQueue) StartCleanup() {
+	go func() {
+		ticker := time.NewTicker(taskSweepInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				q.SweepExpiredTasks()
+			case <-q.stopCh:
+				return
+			}
+		}
+	}()
 }
 
 // NewTaskQueue 创建任务队列
@@ -123,13 +150,11 @@ func (q *TaskQueue) SubmitExcelTask(userID int, filePath string) (*ImportTask, e
 		return nil, fmt.Errorf("任务队列已停止")
 	}
 
-	// 检查用户是否已有进行中的任务
-	if q.hasRunningTaskLocked(userID) {
-		return nil, fmt.Errorf("已有进行中的导入任务")
-	}
+	// 同用户再次提交时作废其未完成任务，避免旧任务占位导致无法重试
+	q.supersedeActiveTasksLocked(userID)
 
 	// 创建任务
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), taskExecTimeout)
 	task := &ImportTask{
 		ID:         generateTaskID(),
 		Type:       ImportTypeExcel,
@@ -154,10 +179,8 @@ func (q *TaskQueue) SubmitManualTask(userID int, weekday, period int, weeks []in
 		return nil, fmt.Errorf("任务队列已停止")
 	}
 
-	// 检查用户是否已有进行中的任务
-	if q.hasRunningTaskLocked(userID) {
-		return nil, fmt.Errorf("已有进行中的导入任务")
-	}
+	// 同用户再次提交时作废其未完成任务，避免旧任务占位导致无法重试
+	q.supersedeActiveTasksLocked(userID)
 
 	// 构建 availabilities
 	var availabilities []model.Availability
@@ -171,7 +194,7 @@ func (q *TaskQueue) SubmitManualTask(userID int, weekday, period int, weeks []in
 	}
 
 	// 创建任务
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), taskExecTimeout)
 	task := &ImportTask{
 		ID:             generateTaskID(),
 		Type:           ImportTypeManual,
@@ -198,11 +221,10 @@ func (q *TaskQueue) SubmitEduTask(userID int, studentID string) (*ImportTask, er
 		return nil, fmt.Errorf("任务队列已停止")
 	}
 
-	if q.hasRunningTaskLocked(userID) {
-		return nil, fmt.Errorf("已有进行中的导入任务")
-	}
+	// 同用户再次提交时作废其未完成任务，避免旧任务占位导致无法重试
+	q.supersedeActiveTasksLocked(userID)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), taskExecTimeout)
 	task := &ImportTask{
 		ID:         generateTaskID(),
 		Type:       ImportTypeEdu,
@@ -247,18 +269,64 @@ func (q *TaskQueue) ResumeEduTask(taskID string) (*ImportTask, error) {
 	if task.cancel != nil {
 		task.cancel()
 	}
-	task.ctx, task.cancel = context.WithTimeout(context.Background(), 5*time.Minute)
+	task.ctx, task.cancel = context.WithTimeout(context.Background(), taskExecTimeout)
 	return q.enqueueTaskLocked(task)
 }
 
-// hasRunningTaskLocked 检查用户是否有进行中的任务（调用前需持有锁）
-func (q *TaskQueue) hasRunningTaskLocked(userID int) bool {
+// statusActive 表示任务处于未完成状态，占用并发槽位。
+func (t *ImportTask) statusActive() bool {
+	return t.Status == TaskStatusPending || t.Status == TaskStatusRunning || t.Status == TaskStatusWaitingLogin
+}
+
+// supersedeActiveTasksLocked 作废指定用户的全部未完成任务，为新提交让路（调用前需持有锁）。
+// 用户无需等待旧任务结束即可重试，避免旧任务占位造成无法再次提交。
+func (q *TaskQueue) supersedeActiveTasksLocked(userID int) {
 	for _, task := range q.tasks {
-		if task.UserID == userID && (task.Status == TaskStatusPending || task.Status == TaskStatusRunning || task.Status == TaskStatusWaitingLogin) {
-			return true
+		if task.UserID != userID || !task.statusActive() {
+			continue
+		}
+		task.Status = TaskStatusCancelled
+		task.Error = "已被新的导入任务替代"
+		now := time.Now()
+		task.FinishedAt = &now
+		if task.cancel != nil {
+			task.cancel()
+		}
+		if task.Type == ImportTypeExcel && task.FilePath != "" {
+			os.Remove(task.FilePath)
+			task.FilePath = ""
 		}
 	}
-	return false
+}
+
+// CancelTask 主动取消指定用户的未完成任务并释放其占用的资源。
+func (q *TaskQueue) CancelTask(taskID string, userID int) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	task, ok := q.tasks[taskID]
+	if !ok {
+		return fmt.Errorf("任务不存在")
+	}
+	if task.UserID != userID {
+		return fmt.Errorf("无权操作此任务")
+	}
+	if !task.statusActive() {
+		return fmt.Errorf("任务已结束，无需取消")
+	}
+
+	task.Status = TaskStatusCancelled
+	task.Error = "任务已取消"
+	now := time.Now()
+	task.FinishedAt = &now
+	if task.cancel != nil {
+		task.cancel()
+	}
+	if task.Type == ImportTypeExcel && task.FilePath != "" {
+		os.Remove(task.FilePath)
+		task.FilePath = ""
+	}
+	return nil
 }
 
 // enqueueTaskLocked 将任务加入队列（调用前需持有锁）
@@ -332,12 +400,24 @@ func (q *TaskQueue) worker(id int) {
 
 // processTask 处理任务
 func (q *TaskQueue) processTask(task *ImportTask) {
-	// 更新状态为执行中
+	// 已被取消的任务（重复提交或主动取消）不再执行
 	q.mu.Lock()
+	if task.Status == TaskStatusCancelled {
+		q.mu.Unlock()
+		return
+	}
 	task.Status = TaskStatusRunning
 	now := time.Now()
 	task.StartedAt = &now
 	q.mu.Unlock()
+
+	// 执行过程 panic 时任务必须落到失败终态，否则会永久停留在执行中，
+	// 并使并发槽位无法释放
+	defer func() {
+		if r := recover(); r != nil {
+			q.finishTask(task, nil, fmt.Errorf("任务执行异常: %v", r))
+		}
+	}()
 
 	// 根据任务类型执行
 	var result *ImportResult
@@ -354,12 +434,25 @@ func (q *TaskQueue) processTask(task *ImportTask) {
 		err = fmt.Errorf("未知的任务类型: %s", task.Type)
 	}
 
-	// 更新任务状态
+	q.mu.RLock()
+	waiting := task.Status == TaskStatusWaitingLogin
+	q.mu.RUnlock()
+
+	// 等待登录：保留状态与上下文，待用户扫码后由 ResumeEduTask 重新入队
+	if waiting {
+		return
+	}
+
+	q.finishTask(task, result, err)
+}
+
+// finishTask 写入任务终态。已被取消或已进入终态的任务不会被覆盖。
+func (q *TaskQueue) finishTask(task *ImportTask, result *ImportResult, err error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	// 等待登录：保留状态与上下文，待用户扫码后由 ResumeEduTask 重新入队
-	if task.Status == TaskStatusWaitingLogin {
+	switch task.Status {
+	case TaskStatusCancelled, TaskStatusCompleted, TaskStatusFailed:
 		return
 	}
 
@@ -433,7 +526,7 @@ func (q *TaskQueue) executeEduImport(task *ImportTask) (*ImportResult, error) {
 	default:
 	}
 
-	data, filename, err := NewEduTimetableService().Download(jar)
+	data, filename, err := NewEduTimetableService().Download(task.ctx, jar)
 	if err != nil {
 		if errors.Is(err, ErrEduSessionInvalid) {
 			GetEduSessionCache().Delete(task.StudentID)
@@ -475,7 +568,7 @@ func (q *TaskQueue) doExcelImport(task *ImportTask) (*ImportResult, error) {
 		if err != nil {
 			return nil, fmt.Errorf("序列化无课数据失败: %w", err)
 		}
-		err = db.WithRetry(context.Background(), func() error {
+		err = db.WithRetry(task.ctx, func() error {
 			_, e := db.GetDB().Exec("CALL sp_replace_availability(?, ?)", task.UserID, string(itemsJSON))
 			return e
 		})
@@ -548,38 +641,88 @@ func (q *TaskQueue) executeManualImport(task *ImportTask) (*ImportResult, error)
 // Stop 停止队列
 func (q *TaskQueue) Stop() {
 	q.mu.Lock()
-	defer q.mu.Unlock()
-
 	if q.stopped {
+		q.mu.Unlock()
 		return
 	}
-
 	q.stopped = true
 	close(q.stopCh)
+	q.mu.Unlock()
+
+	// 必须先释放锁再等待：worker 收尾时也要获取该锁
 	q.wg.Wait()
 }
 
-// generateTaskID 生成任务ID
+var taskIDSeq uint64
+
+// generateTaskID 生成任务ID。时间戳受系统时钟粒度限制（Windows 约 1ms），
+// 连续提交可能落在同一刻度上，故追加自增序号保证唯一。
 func generateTaskID() string {
-	return fmt.Sprintf("task_%d", time.Now().UnixNano())
+	seq := atomic.AddUint64(&taskIDSeq, 1)
+	return fmt.Sprintf("task_%d_%d", time.Now().UnixNano(), seq)
 }
 
-// CleanupOldTasks 清理旧任务（保留最近24小时的）
-func (q *TaskQueue) CleanupOldTasks() {
+// SweepExpiredTasks 回收超时任务与过期终态任务。
+// 超时任务置为失败并释放其占用的槽位；终态任务保留一段时间后移除。
+func (q *TaskQueue) SweepExpiredTasks() {
+	now := time.Now()
+
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	cutoff := time.Now().Add(-24 * time.Hour)
 	for id, task := range q.tasks {
-		if task.CreatedAt.Before(cutoff) {
+		switch task.Status {
+		case TaskStatusPending, TaskStatusRunning, TaskStatusWaitingLogin:
+			reason := q.expirationReason(task, now)
+			if reason == "" {
+				continue
+			}
+			task.Status = TaskStatusFailed
+			task.Error = reason
+			finished := now
+			task.FinishedAt = &finished
 			if task.cancel != nil {
 				task.cancel()
 			}
-			// 清理临时文件
 			if task.Type == ImportTypeExcel && task.FilePath != "" {
 				os.Remove(task.FilePath)
+				task.FilePath = ""
 			}
-			delete(q.tasks, id)
+		default:
+			if !task.CreatedAt.Add(taskRetention).After(now) {
+				if task.Type == ImportTypeExcel && task.FilePath != "" {
+					os.Remove(task.FilePath)
+				}
+				delete(q.tasks, id)
+			}
 		}
 	}
+}
+
+// isExpired 判断任务是否已超出其当前状态允许的最长时长。
+func (q *TaskQueue) isExpired(task *ImportTask, now time.Time) bool {
+	return q.expirationReason(task, now) != ""
+}
+
+// expirationReason 返回任务超时的原因，未超时返回空串。
+func (q *TaskQueue) expirationReason(task *ImportTask, now time.Time) string {
+	switch task.Status {
+	case TaskStatusWaitingLogin:
+		if now.Sub(task.CreatedAt) > waitingLoginTTL {
+			return "等待扫码登录超时，请重新发起导入"
+		}
+	case TaskStatusRunning:
+		start := task.CreatedAt
+		if task.StartedAt != nil {
+			start = *task.StartedAt
+		}
+		if now.Sub(start) > taskExecTimeout {
+			return "导入执行超时，请重试"
+		}
+	case TaskStatusPending:
+		if now.Sub(task.CreatedAt) > taskExecTimeout {
+			return "任务排队超时，请重试"
+		}
+	}
+	return ""
 }

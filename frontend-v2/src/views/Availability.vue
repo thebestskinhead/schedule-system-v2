@@ -147,6 +147,24 @@
       </div>
     </el-dialog>
 
+    <!-- 导入进度：提交后持续展示，直到出现成功/失败/取消的终态 -->
+    <el-dialog
+      v-model="isImporting"
+      title="导入无课表"
+      width="400px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :show-close="false"
+    >
+      <div class="import-progress">
+        <el-progress :percentage="taskProgress" :status="progressStatus" :stroke-width="12" />
+        <p class="import-progress-detail">{{ taskDetail }}</p>
+      </div>
+      <template #footer>
+        <el-button @click="handleCancelImport">取消</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 导入结果 -->
     <el-dialog v-model="showImportResult" title="导入结果" width="400px">
       <el-result
@@ -168,7 +186,7 @@
 import { ref, reactive, onMounted, computed, onUnmounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getMyAvailability, addAvailability, deleteAvailability, importFromXLS } from '../api/availability'
-import { getImportStatus, importFromEdu, resumeEduImport } from '../api/crawler'
+import { getImportStatus, importFromEdu, resumeEduImport, cancelImport } from '../api/crawler'
 import { qrLoginStart, qrLoginPoll } from '../api/user'
 import { getCurrentWeek } from '../api/schedule'
 
@@ -177,24 +195,21 @@ const availabilityList = ref([])
 
 // 从教务系统导入
 const handleSchoolImport = async () => {
-  if (isImporting.value) return
+  if (isImporting.value) {
+    ElMessage.warning('已有导入任务进行中')
+    return
+  }
   try {
     const data = await importFromEdu()
-    currentTask.value = { id: data.task_id, ...data }
 
     if (data.need_login) {
       // 无可用教务登录会话：引导扫码，扫码成功后继续导入
-      currentTask.value.id = data.task_id
       openQrDialog(data.task_id)
       return
     }
 
-    isImporting.value = true
-    taskStatus.value = data.status || 'pending'
-    taskProgress.value = 10
-    taskDetail.value = data.message || '任务已提交，正在导入中...'
     ElMessage.success('任务已提交，正在导入中...')
-    startStatusPolling()
+    beginProgress(data.task_id, data.message || '任务已提交，正在导入中...')
   } catch (error) {
     ElMessage.error(error.message || '发起导入失败')
   }
@@ -247,9 +262,13 @@ const pollQr = async () => {
     if (res.status === 'success') {
       qrStatus.value = 'confirmed'
       qrPollTimer = null
-      // 扫码成功，教务会话已缓存，继续导入
+      // 先清空任务号再关窗：Element Plus 在程序修改 v-model 时同样触发 @close，
+      // 不清空会把刚登录成功的任务误判为用户主动取消
+      const taskId = qrTaskId.value
+      qrTaskId.value = ''
       qrVisible.value = false
-      await resumeAfterLogin()
+      // 扫码成功，教务会话已缓存，继续导入
+      await resumeAfterLogin(taskId)
       return
     }
     if (res.status === 'expired' || res.status === 'error') {
@@ -265,26 +284,54 @@ const pollQr = async () => {
   }
 }
 
-async function resumeAfterLogin() {
+async function resumeAfterLogin(taskId) {
+  const id = taskId || qrTaskId.value
+  if (!id) {
+    ElMessage.error('任务信息丢失，请重新发起导入')
+    return
+  }
   try {
-    await resumeEduImport(qrTaskId.value)
-    isImporting.value = true
-    taskStatus.value = 'pending'
-    taskProgress.value = 10
-    taskDetail.value = '登录成功，正在导入课表...'
+    await resumeEduImport(id)
     ElMessage.success('登录成功，正在导入课表...')
-    startStatusPolling()
+    beginProgress(id, '登录成功，正在导入课表...')
   } catch (error) {
-    ElMessage.error(error.message || '继续导入失败')
-    isImporting.value = false
+    // 扫码耗时较久时原任务可能已过期，此时登录会话已缓存，重新发起即可直接执行
+    try {
+      const data = await importFromEdu()
+      beginProgress(data.task_id, data.message || '正在导入课表...')
+    } catch (retryError) {
+      ElMessage.error(retryError.message || '继续导入失败')
+      isImporting.value = false
+    }
   }
 }
 
 function closeQrDialog() {
   clearTimeout(qrPollTimer)
   qrPollTimer = null
+  const taskId = qrTaskId.value
+  qrTaskId.value = ''
   qrVisible.value = false
+  // 用户主动关闭扫码窗：作废后端等待中的任务，立即释放占位
+  if (taskId) {
+    releaseImport(taskId)
+    ElMessage.info('已取消导入')
+  }
+}
+
+// 作废后端任务并复位进度状态
+async function releaseImport(taskId) {
+  try {
+    await cancelImport(taskId)
+  } catch (error) {
+    // 任务可能已进入终态，无需处理
+  }
+  stopStatusPolling()
+  isImporting.value = false
   currentTask.value = null
+  taskStatus.value = ''
+  taskProgress.value = 0
+  taskDetail.value = ''
 }
 
 // XLS上传相关
@@ -304,13 +351,22 @@ const importResult = reactive({
   imported: 0
 })
 
-// 任务导入相关（Cookie导入使用异步任务模式）
+// 任务导入相关（导入走异步任务队列）
 const isImporting = ref(false)
 const currentTask = ref(null)
 const taskStatus = ref('')
 const taskProgress = ref(0)
 const taskDetail = ref('')
 let statusPollTimer = null
+let statusPollBootTimer = null
+let statusPollFailures = 0
+
+// 进度条状态，仅在终态时变化
+const progressStatus = computed(() => {
+  if (taskStatus.value === 'completed') return 'success'
+  if (taskStatus.value === 'failed' || taskStatus.value === 'cancelled') return 'exception'
+  return undefined
+})
 
 // 编辑相关
 const showEditDialog = ref(false)
@@ -447,23 +503,11 @@ const handleSaveEdit = async () => {
       })
 
       // 切换到导入中状态
-      isImporting.value = true
       showEditDialog.value = false
       await nextTick()
 
-      currentTask.value = {
-        id: data.task_id,
-        created_at: data.created_at,
-        ...data
-      }
-      taskStatus.value = data.status || 'pending'
-      taskProgress.value = 10
-      taskDetail.value = '任务已提交，正在保存...'
-
       ElMessage.success('任务已提交，正在保存中...')
-
-      // 开始轮询任务状态
-      startStatusPolling()
+      beginProgress(data.task_id, '任务已提交，正在保存...')
     } else {
       // 没有选中的周次，直接刷新
       ElMessage.success('保存成功')
@@ -496,61 +540,90 @@ const fetchData = async () => {
 
 // 开始轮询任务状态
 const startStatusPolling = () => {
+  stopStatusPolling()
+  statusPollFailures = 0
   // 延迟1秒后查询，给服务器处理时间
-  setTimeout(() => {
-    checkTaskStatus()
-  }, 1000)
-
+  statusPollBootTimer = setTimeout(checkTaskStatus, 1000)
   // 每2秒查询一次
-  statusPollTimer = setInterval(() => {
-    checkTaskStatus()
-  }, 2000)
+  statusPollTimer = setInterval(checkTaskStatus, 2000)
+}
+
+// 停止轮询
+const stopStatusPolling = () => {
+  if (statusPollTimer) {
+    clearInterval(statusPollTimer)
+    statusPollTimer = null
+  }
+  if (statusPollBootTimer) {
+    clearTimeout(statusPollBootTimer)
+    statusPollBootTimer = null
+  }
+}
+
+// 提交任务后进入进度态：锁定操作并开始轮询，直到出现成功/失败/取消的终态
+const beginProgress = (taskId, detail) => {
+  currentTask.value = { id: taskId }
+  taskStatus.value = 'pending'
+  taskProgress.value = 10
+  taskDetail.value = detail || '任务已提交，正在导入中...'
+  isImporting.value = true
+  startStatusPolling()
 }
 
 // 检查任务状态
 const checkTaskStatus = async () => {
-  if (!currentTask.value?.id) {
-    console.log('无任务ID，停止轮询')
-    clearInterval(statusPollTimer)
+  const taskId = currentTask.value?.id
+  if (!taskId) {
+    stopStatusPolling()
     return
   }
 
+  let data
   try {
-    console.log('查询任务状态:', currentTask.value.id)
-    const data = await getImportStatus(currentTask.value.id)
-    console.log('任务状态响应:', data)
-
-    currentTask.value = data
-    taskStatus.value = data.status || 'pending'
-
-    // 更新进度和详情
-    if (data.status === 'pending') {
-      taskProgress.value = 10
-      taskDetail.value = '任务排队中，请稍候...'
-    } else if (data.status === 'waiting_login') {
-      // 执行中发现教务会话失效：停止轮询并重新引导扫码
-      clearInterval(statusPollTimer)
-      isImporting.value = false
-      openQrDialog(currentTask.value.id)
-    } else if (data.status === 'running') {
-      taskProgress.value = 50
-      taskDetail.value = '正在爬取课表数据...'
-    } else if (data.status === 'completed') {
-      taskProgress.value = 100
-      taskDetail.value = '导入完成！'
-      handleImportComplete(data)
-    } else if (data.status === 'failed') {
-      taskDetail.value = data.error || '导入失败'
-      handleImportFailed(data)
-    }
+    data = await getImportStatus(taskId)
+    statusPollFailures = 0
   } catch (error) {
-    console.error('查询任务状态失败:', error)
+    // 任务可能已被清理，连续失败即停止轮询并解锁，避免界面无限等待
+    statusPollFailures += 1
+    if (statusPollFailures >= 5) {
+      stopStatusPolling()
+      isImporting.value = false
+      ElMessage.warning('无法获取导入进度，请稍后在任务列表查看结果')
+    }
+    return
+  }
+
+  currentTask.value = data
+  taskStatus.value = data.status || 'pending'
+
+  // 更新进度和详情
+  if (data.status === 'pending') {
+    taskProgress.value = 10
+    taskDetail.value = '任务排队中，请稍候...'
+  } else if (data.status === 'waiting_login') {
+    // 执行中发现教务会话失效：停止轮询并重新引导扫码
+    stopStatusPolling()
+    isImporting.value = false
+    openQrDialog(taskId)
+  } else if (data.status === 'running') {
+    taskProgress.value = 50
+    taskDetail.value = '正在获取课表数据...'
+  } else if (data.status === 'completed') {
+    taskProgress.value = 100
+    taskDetail.value = '导入完成'
+    handleImportComplete(data)
+  } else if (data.status === 'failed') {
+    taskProgress.value = 100
+    taskDetail.value = data.error || '导入失败'
+    handleImportFailed(data)
+  } else if (data.status === 'cancelled') {
+    handleImportCancelled()
   }
 }
 
 // 处理导入完成
 const handleImportComplete = (data) => {
-  clearInterval(statusPollTimer)
+  stopStatusPolling()
   isImporting.value = false
 
   Object.assign(importResult, {
@@ -569,7 +642,7 @@ const handleImportComplete = (data) => {
 
 // 处理导入失败
 const handleImportFailed = (data) => {
-  clearInterval(statusPollTimer)
+  stopStatusPolling()
   isImporting.value = false
 
   Object.assign(importResult, {
@@ -585,14 +658,26 @@ const handleImportFailed = (data) => {
   ElMessage.error(data.error || '导入失败')
 }
 
-// 取消导入
-const cancelImport = () => {
-  clearInterval(statusPollTimer)
+// 处理任务被取消（重复提交时旧任务会被作废）
+const handleImportCancelled = () => {
+  stopStatusPolling()
   isImporting.value = false
   currentTask.value = null
   taskStatus.value = ''
   taskProgress.value = 0
   taskDetail.value = ''
+  ElMessage.info('导入任务已取消')
+}
+
+// 取消导入：通知后端作废任务并释放占位
+const handleCancelImport = async () => {
+  const taskId = currentTask.value?.id
+  if (taskId) {
+    await releaseImport(taskId)
+  } else {
+    stopStatusPolling()
+    isImporting.value = false
+  }
   ElMessage.info('已取消导入')
 }
 
@@ -613,23 +698,11 @@ const handleXLSImport = async () => {
     const data = await importFromXLS(selectedFile.value)
 
     // 切换到导入中状态
-    isImporting.value = true
     showXLSUpload.value = false
     await nextTick()
 
-    currentTask.value = {
-      id: data.task_id,
-      created_at: data.created_at,
-      ...data
-    }
-    taskStatus.value = data.status || 'pending'
-    taskProgress.value = 10
-    taskDetail.value = '任务已提交，正在排队中...'
-
     ElMessage.success('任务已提交，正在导入中...')
-
-    // 开始轮询任务状态
-    startStatusPolling()
+    beginProgress(data.task_id, '任务已提交，正在排队中...')
   } catch (error) {
     Object.assign(importResult, {
       success: false,
@@ -651,9 +724,7 @@ onMounted(() => {
 
 // 组件卸载时清理定时器
 onUnmounted(() => {
-  if (statusPollTimer) {
-    clearInterval(statusPollTimer)
-  }
+  stopStatusPolling()
   if (qrPollTimer) {
     clearTimeout(qrPollTimer)
   }
@@ -917,5 +988,16 @@ onUnmounted(() => {
   margin: 0;
   font-size: 12px;
   color: #909399;
+}
+
+.import-progress {
+  padding: 8px 4px;
+}
+
+.import-progress-detail {
+  margin: 16px 0 0;
+  font-size: 13px;
+  color: #606266;
+  text-align: center;
 }
 </style>

@@ -228,6 +228,33 @@ func eduTaskMessage(status service.TaskStatus) string {
 	}
 }
 
+// CancelImportTask 取消当前用户指定的导入任务并释放其占用的资源。
+func (h *AvailabilityHandler) CancelImportTask(c *gin.Context) {
+	userID := auth.GetUserIDFromContext(c)
+	if userID == 0 {
+		auth.ResponseUnauthorized(c)
+		return
+	}
+
+	var req struct {
+		TaskID string `json:"task_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.Error(c, http.StatusBadRequest, "参数错误: "+err.Error())
+		return
+	}
+
+	if err := service.GetTaskQueue().CancelTask(req.TaskID, userID); err != nil {
+		utils.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	utils.Success(c, gin.H{
+		"task_id": req.TaskID,
+		"status":  service.TaskStatusCancelled,
+	})
+}
+
 // ImportFromXLS 从XLS文件导入课表（异步队列模式）
 func (h *AvailabilityHandler) ImportFromXLS(c *gin.Context) {
 	userID := auth.GetUserIDFromContext(c)

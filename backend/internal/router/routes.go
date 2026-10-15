@@ -77,6 +77,7 @@ func buildRoutes(h *Handlers) []RouteDef {
 		{Method: "POST", Path: "/availability/import/xls-base64", Auth: true, Perms: []auth.Permission{auth.PermAvailabilityImport}, Handler: h.Availability.ImportFromXLSBase64},
 		{Method: "GET", Path: "/availability/import/status", Auth: true, Perms: []auth.Permission{auth.PermAvailabilityImport}, Handler: h.Availability.GetImportTaskStatus},
 		{Method: "GET", Path: "/availability/import/tasks", Auth: true, Perms: []auth.Permission{auth.PermAvailabilityImport}, Handler: h.Availability.GetImportTaskList},
+		{Method: "POST", Path: "/availability/import/cancel", Auth: true, Perms: []auth.Permission{auth.PermAvailabilityImport}, Handler: h.Availability.CancelImportTask},
 		{Method: "POST", Path: "/availability/import/edu", Auth: true, Perms: []auth.Permission{auth.PermAvailabilityImport}, Handler: h.Availability.ImportFromEdu},
 		{Method: "POST", Path: "/availability/import/edu/resume", Auth: true, Perms: []auth.Permission{auth.PermAvailabilityImport}, Handler: h.Availability.ResumeEduImport},
 
