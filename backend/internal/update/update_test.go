@@ -20,13 +20,15 @@ func TestParseVersion(t *testing.T) {
 		want Version
 		ok   bool
 	}{
-		{"v3.0.1", Version{3, 0, 1, "v3.0.1"}, true},
-		{"3.0.1", Version{3, 0, 1, "3.0.1"}, true},
-		{"v2.10.0-test", Version{2, 10, 0, "v2.10.0-test"}, true},
-		{"v10.20.30+build", Version{10, 20, 30, "v10.20.30+build"}, true},
+		{"v3.0.1", Version{3, 0, 1, "", "v3.0.1"}, true},
+		{"3.0.1", Version{3, 0, 1, "", "3.0.1"}, true},
+		{"v2.10.0-test", Version{2, 10, 0, "test", "v2.10.0-test"}, true},
+		{"v10.20.30+build", Version{10, 20, 30, "build", "v10.20.30+build"}, true},
+		{"v3.1.0-dev+abc123", Version{3, 1, 0, "dev+abc123", "v3.1.0-dev+abc123"}, true},
 		{"v1.2", Version{}, false},
 		{"abc", Version{}, false},
 		{"", Version{}, false},
+		{"v1.2.3.4", Version{}, false},
 	}
 	for _, c := range cases {
 		got, err := ParseVersion(c.in)
@@ -44,17 +46,70 @@ func TestParseVersion(t *testing.T) {
 	}
 }
 
+func TestVersionString(t *testing.T) {
+	cases := map[string]string{
+		"v3.0.1":            "v3.0.1",
+		"v3.1.0-dev":        "v3.1.0-dev",
+		"v3.1.0-dev+abc123": "v3.1.0-dev+abc123",
+	}
+	for in, want := range cases {
+		v, err := ParseVersion(in)
+		if err != nil {
+			t.Fatalf("ParseVersion(%q): %v", in, err)
+		}
+		if got := v.String(); got != want {
+			t.Errorf("(%s).String() = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestVersionCompare(t *testing.T) {
-	a := Version{2, 3, 0, ""}
-	b := Version{2, 3, 1, ""}
+	a := Version{2, 3, 0, "", ""}
+	b := Version{2, 3, 1, "", ""}
 	if a.Compare(b) != -1 || b.Compare(a) != 1 || a.Compare(a) != 0 {
 		t.Error("Compare 结果不符合预期")
 	}
-	if !a.SameMajor(Version{2, 99, 99, ""}) {
+	if !a.SameMajor(Version{2, 99, 99, "", ""}) {
 		t.Error("SameMajor 应当忽略 minor/patch")
 	}
-	if a.SameMajor(Version{3, 0, 0, ""}) {
+	if a.SameMajor(Version{3, 0, 0, "", ""}) {
 		t.Error("不同大版本不应判定为 SameMajor")
+	}
+}
+
+// TestVersionComparePrerelease 预发布排序（semver 规则）：
+// 正式版高于预发布版；否则 CI 分支构建的 v3.1.0-dev+sha 部署后
+// 将永远收不到正式版 v3.1.0 的更新。
+func TestVersionComparePrerelease(t *testing.T) {
+	parse := func(s string) Version {
+		v, err := ParseVersion(s)
+		if err != nil {
+			t.Fatalf("ParseVersion(%q): %v", s, err)
+		}
+		return v
+	}
+	cases := []struct {
+		lo, hi string
+		desc   string
+	}{
+		{"v3.1.0-dev+abc123", "v3.1.0", "预发布版低于正式版"},
+		{"v3.1.0-alpha", "v3.1.0-beta", "字典序：alpha < beta"},
+		{"v3.1.0-alpha.1", "v3.1.0-alpha.2", "数字标识符按数值：1 < 2"},
+		{"v3.1.0-alpha.2", "v3.1.0-alpha.10", "数字标识符按数值而非字典序：2 < 10"},
+		{"v3.0.1", "v3.1.0-dev", "主版本号优先于预发布标记"},
+		{"v3.1.0-dev+aaa", "v3.1.0-dev+bbb", "两个 dev 构建按 sha 排序"},
+	}
+	for _, c := range cases {
+		lo, hi := parse(c.lo), parse(c.hi)
+		if lo.Compare(hi) != -1 {
+			t.Errorf("%s: (%s).Compare(%s) = %d, want -1", c.desc, c.lo, c.hi, lo.Compare(hi))
+		}
+		if hi.Compare(lo) != 1 {
+			t.Errorf("%s: (%s).Compare(%s) = %d, want 1", c.desc, c.hi, c.lo, hi.Compare(lo))
+		}
+		if lo.Compare(lo) != 0 {
+			t.Errorf("%s: 自身比较应为 0", c.desc)
+		}
 	}
 }
 
@@ -63,12 +118,31 @@ func TestVersionFileRoundTrip(t *testing.T) {
 	if got := CurrentVersion(dir); got.Raw != "v0.0.0" {
 		t.Errorf("无 version.txt 时应为 v0.0.0，得到 %s", got.Raw)
 	}
-	v := Version{3, 1, 4, "v3.1.4"}
+	v := Version{3, 1, 4, "", "v3.1.4"}
 	if err := WriteVersion(dir, v); err != nil {
 		t.Fatalf("WriteVersion: %v", err)
 	}
 	if got := CurrentVersion(dir); got.String() != "v3.1.4" {
 		t.Errorf("读回版本号 = %s, want v3.1.4", got.String())
+	}
+}
+
+// TestVersionFileRoundTripDev dev 后缀版本号（CI 分支构建产物）必须原样往返
+func TestVersionFileRoundTripDev(t *testing.T) {
+	dir := t.TempDir()
+	v, err := ParseVersion("v3.1.0-dev+abc123")
+	if err != nil {
+		t.Fatalf("ParseVersion: %v", err)
+	}
+	if err := WriteVersion(dir, v); err != nil {
+		t.Fatalf("WriteVersion: %v", err)
+	}
+	got := CurrentVersion(dir)
+	if got.String() != "v3.1.0-dev+abc123" {
+		t.Errorf("读回版本号 = %s, want v3.1.0-dev+abc123", got.String())
+	}
+	if got.Major != 3 || got.Minor != 1 || got.Patch != 0 {
+		t.Errorf("核心版本号解析错误: %+v", got)
 	}
 }
 
@@ -209,9 +283,9 @@ func makeTarGz(t *testing.T, path string, files map[string]string) {
 
 func TestExtractPackage(t *testing.T) {
 	files := map[string]string{
-		"server.exe":     "SERVER",
+		"server.exe":      "SERVER",
 		"dist/index.html": "<h1>DIST</h1>",
-		"dist/a/b.js":    "JS",
+		"dist/a/b.js":     "JS",
 	}
 	zipPath := filepath.Join(t.TempDir(), "pkg.zip")
 	makeZip(t, zipPath, files)

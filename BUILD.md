@@ -83,6 +83,40 @@ update.exe           # 完整更新流程
 - **同大版本才允许热更新**：大版本可能包含数据库结构变更，需手动下载整包并按发布说明迁移；
 - 失败自动回滚：安装前必先备份，回滚后重启旧版本并验证存活。
 
+### 网络要求
+
+热更新需服务端可访问 GitHub：
+
+| 域名 | 用途 |
+|------|------|
+| `api.github.com` | 查询 Release 列表 |
+| `github.com`、`objects.githubusercontent.com` | 下载发布包 |
+
+处于受限网络（表现为 DNS 解析失败 / 连接超时，检查更新返回「无法解析 api.github.com」或「连接 GitHub 超时」）时，可设置代理后重启服务与更新程序：
+
+```bash
+# Windows（启动 server.exe 前设置）
+set HTTPS_PROXY=http://127.0.0.1:7890
+
+# Linux
+export HTTPS_PROXY=http://127.0.0.1:7890
+```
+
+Go 的 HTTP 客户端自动识别 `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` 环境变量，API 查询与安装包下载均走代理。此外可设置 `GITHUB_TOKEN` 提升 API 额度（未认证限流 60 次/小时）。
+
+检查更新失败仅影响更新检查本身，不影响系统正常运行。
+
+### 版本号约定
+
+`version.txt` 由 CI 自动写入，规则见 `build.yml` 的 `Resolve version` 步骤：
+
+| 触发方式 | 写入内容 | 说明 |
+|----------|----------|------|
+| tag 推送 `v3.1.0` | `v3.1.0` | Release 的唯一来源 |
+| 分支推送 / PR / 手动触发 | `v3.0.1-dev+abc1234` | 最近 `v*.*.*` 标签 + dev + 短 sha |
+
+比较遵循语义化版本规则：正式版高于预发布版（`v3.1.0-dev` < `v3.1.0`），因此 dev 构建部署后仍能收到后续正式版的更新。
+
 ---
 
 ## 生产部署

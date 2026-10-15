@@ -1,17 +1,43 @@
 package update
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 )
+
+// GitHubHint 受限网络（GitHub 不可达）时的处置建议，统一追加到网络类错误信息后
+const GitHubHint = "；若服务器处于受限网络，可设置 HTTPS_PROXY 环境变量指向代理后重启服务或更新程序"
+
+// friendlyNetErr 将底层网络错误转换为可操作的中文提示。
+// 原始错误形如 "dial tcp: lookup api.github.com: no such host"，
+// 对管理员没有指导意义，这里按错误类型分类并附上处置建议。
+func friendlyNetErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return fmt.Errorf("无法解析 api.github.com（DNS 解析失败: %s）%s", dnsErr.Err, GitHubHint)
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, os.ErrDeadlineExceeded) {
+		return fmt.Errorf("连接 GitHub 超时（可能被防火墙或网络策略拦截）%s", GitHubHint)
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return fmt.Errorf("连接 GitHub 超时（可能被防火墙或网络策略拦截）%s", GitHubHint)
+	}
+	return fmt.Errorf("无法连接 GitHub（%v）%s", err, GitHubHint)
+}
 
 // DefaultRepo 默认 GitHub 仓库（owner/name）
 const DefaultRepo = "thebestskinhead/schedule-system-v2"
@@ -52,11 +78,11 @@ func (r Release) Version() (Version, error) {
 
 // UpdateInfo 一次更新检查的结果
 type UpdateInfo struct {
-	Current      Version `json:"current"`
-	Target       Version `json:"target"`
-	HasUpdate    bool    `json:"hasUpdate"`
+	Current      Version `json:"current"`      // 当前部署版本
+	Target       Version `json:"target"`       // 目标版本；无可更新时等于 Current，跨大版本时为最新大版本
+	HasUpdate    bool    `json:"hasUpdate"`    // 是否存在可热更新的同大版本新版本
 	SameMajor    bool    `json:"sameMajor"`    // 目标与当前同大版本（可热更新）
-	CrossMajor   bool    `json:"crossMajor"`   // 存在更新但跨大版本（需手动整包升级）
+	CrossMajor   bool    `json:"crossMajor"`   // 无可热更新的版本，但存在更新的大版本（需手动整包升级）
 	AssetName    string  `json:"assetName"`    // 目标平台对应的资产文件名
 	DownloadURL  string  `json:"downloadUrl"`  // 资产下载地址
 	AssetSize    int64   `json:"assetSize"`    // 资产大小（字节）
@@ -106,7 +132,7 @@ func (g *ghClient) ListReleases() ([]Release, error) {
 	}
 	resp, err := g.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("请求 GitHub API 失败: %w", err)
+		return nil, friendlyNetErr(err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
@@ -143,7 +169,7 @@ func CheckUpdate(dir, repo, platformAssetName string, allowPrerelease bool) (*Up
 		return vi.Compare(vj) > 0
 	})
 
-	var newest Version       // 跨大版本也记录，用于提示手动升级
+	var newest Version // 跨大版本也记录，用于提示手动升级
 	var newestFound bool
 	for _, r := range releases {
 		if r.Draft {
@@ -184,7 +210,7 @@ func CheckUpdate(dir, repo, platformAssetName string, allowPrerelease bool) (*Up
 	}
 
 	// 没有可热更新的版本。若有更新但跨大版本，标记出来提示手动升级
-	info := &UpdateInfo{Current: current, HasUpdate: false}
+	info := &UpdateInfo{Current: current, Target: current, HasUpdate: false, SameMajor: true}
 	if newestFound && newest.Compare(current) > 0 && !current.SameMajor(newest) {
 		info.CrossMajor = true
 		info.Target = newest
@@ -228,7 +254,7 @@ func DownloadFileCancelable(url, dest string, onProgress func(received, total in
 	}
 	resp, err := (&http.Client{Timeout: 0}).Do(req)
 	if err != nil {
-		return fmt.Errorf("下载失败: %w", err)
+		return friendlyNetErr(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -293,7 +319,7 @@ func DownloadChecksum(url string) (string, error) {
 	}
 	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
 	if err != nil {
-		return "", err
+		return "", friendlyNetErr(err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
@@ -307,9 +333,6 @@ func DownloadChecksum(url string) (string, error) {
 	}
 	return strings.ToLower(fields[0]), nil
 }
-
-// escapeURLQuery 备用：对查询参数编码（当前未使用，保留给未来带参数请求）
-func escapeURLQuery(s string) string { return url.QueryEscape(s) }
 
 func truncate(s string, max int) string {
 	if len(s) <= max {

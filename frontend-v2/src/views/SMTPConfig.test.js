@@ -129,6 +129,51 @@ describe('SMTPConfig 系统更新卡片', () => {
     wrapper.unmount()
   })
 
+  it('检查更新：无可热更新版本但存在更高大版本时同样提示手动下载', async () => {
+    // 后端在"找不到可用同大版本更新、但存在更高大版本"时置 crossMajor=true
+    checkUpdate.mockResolvedValue({
+      current: 'v3.1.0',
+      target: 'v4.0.0',
+      hasUpdate: false,
+      sameMajor: false,
+      crossMajor: true,
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await findButton(wrapper, '检查更新').trigger('click')
+    await flushPromises()
+
+    const tags = wrapper.findAll('.el-tag').map((t) => t.text())
+    expect(tags.some((t) => t.includes('跨大版本'))).toBe(true)
+    expect(tags.some((t) => t.includes('已是最新'))).toBe(false)
+    expect(findButton(wrapper, '立即更新')).toBeFalsy()
+    expect(findButton(wrapper, '前往下载整包')).toBeTruthy()
+    expect(wrapper.text()).toContain('v4.0.0')
+    wrapper.unmount()
+  })
+
+  it('检查更新：无更新时最新版本展示为当前版本而非零值', async () => {
+    // 后端保证无更新时 target = current（回归：曾返回 v0.0.0）
+    checkUpdate.mockResolvedValue({
+      current: 'v3.1.0-dev+e40455c',
+      target: 'v3.1.0-dev+e40455c',
+      hasUpdate: false,
+      sameMajor: true,
+      crossMajor: false,
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await findButton(wrapper, '检查更新').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('v0.0.0')
+    const verTexts = wrapper.findAll('.ver-text').map((v) => v.text())
+    expect(verTexts).toContain('v3.1.0-dev+e40455c')
+    wrapper.unmount()
+  })
+
   it('检查更新：跨大版本时提示手动下载整包', async () => {
     checkUpdate.mockResolvedValue({
       current: 'v2.2.0',

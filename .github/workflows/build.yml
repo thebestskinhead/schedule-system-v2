@@ -26,6 +26,24 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # 完整历史：供下一步 git describe 定位最近的版本标签
+          fetch-depth: 0
+
+      - name: Resolve version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            # tag 推送：版本号即标签（release 的唯一来源）
+            VERSION="${GITHUB_REF_NAME}"
+          else
+            # 分支推送 / PR / 手动触发：最近的 v*.*.* 标签 + dev + 短 sha。
+            # 语义化版本比较下预发布版低于正式版（见 backend/internal/update/version.go），
+            # 因此 dev 产物部署后仍能收到将来正式版的更新。
+            LATEST=$(git describe --tags --match 'v*.*.*' --abbrev=0 2>/dev/null || echo "v0.0.0")
+            VERSION="${LATEST}-dev+${GITHUB_SHA::7}"
+          fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "构建版本号: ${VERSION}"
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -76,7 +94,7 @@ jobs:
       - name: Assemble Linux package
         run: |
           chmod +x .github/scripts/package.sh
-          TARGET=linux VERSION="${{ github.ref_name }}" bash .github/scripts/package.sh
+          TARGET=linux VERSION="${{ env.VERSION }}" bash .github/scripts/package.sh
 
       - name: Archive Linux package
         run: |
@@ -95,7 +113,7 @@ jobs:
       - name: Assemble Windows package
         run: |
           chmod +x .github/scripts/package.sh
-          TARGET=windows VERSION="${{ github.ref_name }}" bash .github/scripts/package.sh
+          TARGET=windows VERSION="${{ env.VERSION }}" bash .github/scripts/package.sh
 
       - name: Archive Windows package
         run: |

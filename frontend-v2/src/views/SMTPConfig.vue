@@ -82,10 +82,10 @@
             <span class="ver-text" :class="{ 'ver-new': updateInfo.hasUpdate && updateInfo.sameMajor }">
               {{ updateInfo.target }}
             </span>
-            <el-tag v-if="updateInfo.hasUpdate && updateInfo.sameMajor" type="success" size="small" style="margin-left: 8px;">
+            <el-tag v-if="canHotUpdate" type="success" size="small" style="margin-left: 8px;">
               可热更新{{ updateInfo.assetSize ? '（' + formatSize(updateInfo.assetSize) + '）' : '' }}
             </el-tag>
-            <el-tag v-else-if="updateInfo.hasUpdate" type="warning" size="small" style="margin-left: 8px;">跨大版本</el-tag>
+            <el-tag v-else-if="isCrossMajor" type="warning" size="small" style="margin-left: 8px;">跨大版本</el-tag>
             <el-tag v-else type="info" size="small" style="margin-left: 8px;">已是最新</el-tag>
           </template>
           <span v-else class="form-hint">点击「检查更新」获取最新版本信息</span>
@@ -102,15 +102,15 @@
         <el-form-item>
           <el-button type="primary" @click="doCheckUpdate" :loading="checking">检查更新</el-button>
           <el-button
-            v-if="updateInfo && updateInfo.hasUpdate && updateInfo.sameMajor"
+            v-if="canHotUpdate"
             type="success"
             @click="doStartUpdate"
             :loading="updating"
           >立即更新</el-button>
-          <el-button v-else-if="updateInfo && updateInfo.hasUpdate" @click="openReleasePage">前往下载整包</el-button>
+          <el-button v-else-if="isCrossMajor" @click="openReleasePage">前往下载整包</el-button>
         </el-form-item>
-        <div v-if="updateInfo && updateInfo.hasUpdate && !updateInfo.sameMajor" class="update-warning">
-          新版本 {{ updateInfo.target }} 与当前版本跨大版本，可能包含数据库结构变更，无法热更新。
+        <div v-if="isCrossMajor" class="update-warning">
+          新版本 {{ updateInfo.target }} 与当前版本（{{ updateInfo.current }}）跨大版本，可能包含数据库结构变更，无法热更新。
           请手动下载整包，并按发布说明迁移数据库后再升级。
         </div>
         <div class="form-hint">
@@ -279,6 +279,19 @@ const formatSize = (bytes) => {
   if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
   return (bytes / 1048576).toFixed(2) + ' MB'
 }
+
+// 可热更新：同大版本且存在更高版本
+const canHotUpdate = computed(() => {
+  const info = updateInfo.value
+  return !!info && info.hasUpdate === true && info.sameMajor === true
+})
+
+// 跨大版本：有更高大版本（无论是否找到可热更新的同大版本版本）
+const isCrossMajor = computed(() => {
+  const info = updateInfo.value
+  if (!info) return false
+  return info.crossMajor === true || (info.hasUpdate === true && info.sameMajor === false)
+})
 
 const loadVersion = async () => {
   try {
