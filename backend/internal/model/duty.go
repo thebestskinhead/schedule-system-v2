@@ -4,17 +4,17 @@ import "time"
 
 // DutyRecord 值班记录
 type DutyRecord struct {
-	ID         int        `json:"id" db:"id"`
-	Week       int        `json:"week" db:"week"`
-	Weekday    int        `json:"weekday" db:"weekday"`
-	Period     int        `json:"period" db:"period"`
-	UserID     int        `json:"user_id" db:"user_id"`
-	UserName   string     `json:"user_name,omitempty" db:"-"`
-	AssignedBy int        `json:"assigned_by,omitempty" db:"assigned_by"`
-	Status     string     `json:"status" db:"status"`
-	Remark     *string    `json:"remark,omitempty" db:"remark"`
-	CreatedAt  time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at" db:"updated_at"`
+	ID         int       `json:"id" db:"id"`
+	Week       int       `json:"week" db:"week"`
+	Weekday    int       `json:"weekday" db:"weekday"`
+	Period     int       `json:"period" db:"period"`
+	UserID     int       `json:"user_id" db:"user_id"`
+	UserName   string    `json:"user_name,omitempty" db:"-"`
+	AssignedBy int       `json:"assigned_by,omitempty" db:"assigned_by"`
+	Status     string    `json:"status" db:"status"`
+	Remark     *string   `json:"remark,omitempty" db:"remark"`
+	CreatedAt  time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at" db:"updated_at"`
 }
 
 // DutyStatus 值班状态常量
@@ -27,27 +27,29 @@ const (
 
 // ScheduleRequest 排班请求
 type ScheduleRequest struct {
-	Week           int   `json:"week" binding:"required,min=1,max=30"`
-	Days           []int `json:"days" binding:"required"`
-	NeedPerCell    int   `json:"need_per_cell" binding:"required,min=0,max=10"`
-	MinPerCell     int   `json:"min_per_cell" binding:"min=0,max=10"`     // 最小排班人数，默认0
-	Periods        int   `json:"periods" binding:"required,min=1,max=4"`
-	MaxPerDay      int   `json:"max_per_day" binding:"min=1,max=10"`      // 每人每天最多排几次，默认1
-	MaxPerWeek     int   `json:"max_per_week" binding:"min=1,max=30"`     // 每人每周最多排几次，默认2
-	Department     string `json:"department" binding:"required"`          // 排班部门
+	Week        int    `json:"week" binding:"required,min=1,max=30"`
+	Days        []int  `json:"days" binding:"required"`
+	NeedPerCell int    `json:"need_per_cell" binding:"required,min=0,max=10"`
+	MinPerCell  int    `json:"min_per_cell" binding:"min=0,max=10"` // 最小排班人数，默认0
+	Periods     int    `json:"periods" binding:"required,min=1,max=4"`
+	MaxPerDay   int    `json:"max_per_day" binding:"min=1,max=10"`  // 每人每天最多排几次，默认1
+	MaxPerWeek  int    `json:"max_per_week" binding:"min=1,max=30"` // 每人每周最多排几次，默认2
+	Department  string `json:"department" binding:"required"`       // 排班部门
 }
 
 // ScheduleSettings 排班设置（用于记忆）
 type ScheduleSettings struct {
+	ConfigKey         string     `json:"-" db:"config_key"`
+	CurrentWeekSetAt  *time.Time `json:"-" db:"current_week_set_at"`
 	ID                int        `json:"id" db:"id"`
 	AdminID           int        `json:"admin_id" db:"admin_id"`
-	CurrentWeek       int        `json:"current_week" db:"current_week"`             // 当前周次
-	AutoIncrement     bool       `json:"auto_increment" db:"auto_increment"`         // 是否自动递增周次
-	NeedPerCell       int        `json:"need_per_cell" db:"need_per_cell"`           // 每时段最大人数，默认2
-	MinPerCell        int        `json:"min_per_cell" db:"min_per_cell"`             // 每时段最小人数，默认0
-	MaxPerDay         int        `json:"max_per_day" db:"max_per_day"`               // 每人每天最多排几次，默认1
-	MaxPerWeek        int        `json:"max_per_week" db:"max_per_week"`             // 每人每周最多排几次，默认2
-	ExportTitle       string     `json:"export_title" db:"export_title"`             // 导出Excel标题模板
+	CurrentWeek       int        `json:"current_week" db:"current_week"`               // 当前周次
+	AutoIncrement     bool       `json:"auto_increment" db:"auto_increment"`           // 是否自动递增周次
+	NeedPerCell       int        `json:"need_per_cell" db:"need_per_cell"`             // 每时段最大人数，默认2
+	MinPerCell        int        `json:"min_per_cell" db:"min_per_cell"`               // 每时段最小人数，默认0
+	MaxPerDay         int        `json:"max_per_day" db:"max_per_day"`                 // 每人每天最多排几次，默认1
+	MaxPerWeek        int        `json:"max_per_week" db:"max_per_week"`               // 每人每周最多排几次，默认2
+	ExportTitle       string     `json:"export_title" db:"export_title"`               // 导出Excel标题模板
 	SemesterStartDate *time.Time `json:"semester_start_date" db:"semester_start_date"` // 学期起始日
 	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at" db:"updated_at"`
@@ -55,31 +57,30 @@ type ScheduleSettings struct {
 
 // UpdateCurrentWeekRequest 更新当前周次请求
 type UpdateCurrentWeekRequest struct {
-	CurrentWeek   int  `json:"current_week" binding:"required,min=1,max=30"`
-	AutoIncrement bool `json:"auto_increment"`
+	CurrentWeek int `json:"current_week" binding:"required,min=1,max=30"`
 }
 
 // UpdateScheduleRequest 更新排班请求（添加/删除人员）
 type UpdateScheduleRequest struct {
-	Week    int   `json:"week" binding:"required"`
-	Weekday int   `json:"weekday" binding:"required,min=1,max=5"`
-	Period  int   `json:"period" binding:"required,min=1,max=4"`
+	Week          int   `json:"week" binding:"required"`
+	Weekday       int   `json:"weekday" binding:"required,min=1,max=5"`
+	Period        int   `json:"period" binding:"required,min=1,max=4"`
 	AddUserIDs    []int `json:"add_user_ids"`    // 要添加的用户ID
 	RemoveUserIDs []int `json:"remove_user_ids"` // 要删除的用户ID
 }
 
 // ScheduleCell 排班单元格
 type ScheduleCell struct {
-	Weekday   int    `json:"weekday"`
-	Period    int    `json:"period"`
-	UserIDs   []int  `json:"user_ids"`
+	Weekday   int      `json:"weekday"`
+	Period    int      `json:"period"`
+	UserIDs   []int    `json:"user_ids"`
 	UserNames []string `json:"user_names,omitempty"`
 }
 
 // ScheduleResult 排班结果
 type ScheduleResult struct {
-	Week  int              `json:"week"`
-	Grid  [][]ScheduleCell `json:"grid"` // 5天 × 4节
+	Week int              `json:"week"`
+	Grid [][]ScheduleCell `json:"grid"` // 5天 × 4节
 }
 
 // ScheduleConfirmRequest 确认排班请求
@@ -134,8 +135,31 @@ type ConfirmCell struct {
 
 // ConfirmScheduleRequest 确认排班请求
 type ConfirmScheduleRequest struct {
-	Week  int           `json:"week" binding:"required"`
-	Cells []ConfirmCell `json:"cells" binding:"required"`
+	Week       int           `json:"week" binding:"required,min=1,max=30"`
+	Cells      []ConfirmCell `json:"cells" binding:"required"`
+	MaxPerDay  int           `json:"max_per_day" binding:"omitempty,min=1,max=10"`
+	MaxPerWeek int           `json:"max_per_week" binding:"omitempty,min=1,max=30"`
+}
+
+// CandidateRequest 使用当前草稿统计次数；草稿会替换该周排班，不叠加旧记录。
+type CandidateRequest struct {
+	Week       int           `json:"week" binding:"required,min=1,max=30"`
+	Weekday    int           `json:"weekday" binding:"required,min=1,max=5"`
+	Period     int           `json:"period" binding:"required,min=1,max=4"`
+	Department string        `json:"department" binding:"required"`
+	Cells      []ConfirmCell `json:"cells"`
+	MaxPerDay  int           `json:"max_per_day" binding:"required,min=1,max=10"`
+	MaxPerWeek int           `json:"max_per_week" binding:"required,min=1,max=30"`
+}
+
+type ScheduleCandidate struct {
+	ID        int      `json:"id"`
+	Name      string   `json:"name"`
+	StudentID string   `json:"student_id"`
+	DayCount  int      `json:"day_count"`
+	WeekCount int      `json:"week_count"`
+	Eligible  bool     `json:"eligible"`
+	Reasons   []string `json:"reasons"`
 }
 
 // UpdateDutyStatusRequest 更新值班状态请求

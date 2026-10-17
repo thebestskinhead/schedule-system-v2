@@ -136,7 +136,12 @@ func (d *AvailabilityDAO) GetAvailabilityMatrix(week int, department string) ([]
 	query := `SELECT a.user_id, a.weekday, a.period 
 		FROM availability a 
 		JOIN users u ON a.user_id = u.id 
-		WHERE a.week = ? AND u.department = ? AND u.employment_status = 'active' AND u.dept_role != 'dept_admin'`
+		WHERE a.week = ? AND u.department = ? AND u.employment_status = 'active' AND u.dept_role != 'dept_admin'
+		AND NOT EXISTS (
+			SELECT 1 FROM leave_requests lr WHERE lr.user_id = u.id AND lr.status = 'approved'
+			AND DATE_ADD((SELECT semester_start_date FROM schedule_settings WHERE config_key = 'global'),
+			    INTERVAL (a.week - 1) * 7 + (a.weekday - 1) DAY) BETWEEN lr.start_date AND lr.end_date
+		)`
 	err := db.GetDB().Select(&items, query, week, department)
 	return items, err
 }

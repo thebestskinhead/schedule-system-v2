@@ -12,7 +12,7 @@
           size="small" 
           type="primary"
           plain
-          @click="showWeekDialog = true"
+          @click="weekForm.currentWeek = currentWeek; showWeekDialog = true"
         >
           设置周次
         </van-button>
@@ -158,11 +158,7 @@
               <van-stepper v-model="weekForm.currentWeek" min="1" max="30" />
             </template>
           </van-field>
-          <van-cell title="自动递增" label="排班确认后自动进入下一周">
-            <template #right-icon>
-              <van-switch v-model="weekForm.autoIncrement" size="20" />
-            </template>
-          </van-cell>
+          <van-cell title="周次随日期自动递增" label="手动设置后从本周继续计算" />
         </van-cell-group>
 
         <div class="popup-actions">
@@ -187,7 +183,7 @@ const scheduleList = ref([])
 const scheduleLoading = ref(false)
 const showWeekDialog = ref(false)
 const saving = ref(false)
-const weekForm = ref({ currentWeek: 1, autoIncrement: false })
+const weekForm = ref({ currentWeek: 1 })
 
 const weekNames = ['一', '二', '三', '四', '五']
 
@@ -292,8 +288,7 @@ const saveWeek = async () => {
   saving.value = true
   try {
     await updateCurrentWeek({
-      current_week: weekForm.value.currentWeek,
-      auto_increment: weekForm.value.autoIncrement
+      current_week: weekForm.value.currentWeek
     })
     currentWeek.value = weekForm.value.currentWeek
     showToast({ message: '设置成功', type: 'success' })

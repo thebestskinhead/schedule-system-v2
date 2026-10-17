@@ -12,6 +12,8 @@ export const getScheduleSettings = () => request.get('/admin/schedule/settings')
 export const saveScheduleSettings = (data) => request.post('/admin/schedule/settings', data)
 export const updateSchedule = (data) => request.post('/admin/schedule/update', data)
 
+export const getScheduleCandidates = (data) => request.post('/admin/schedule/candidates', data)
+
 // 值班相关
 export const getMyDuties = () => request.get('/duty/my')
 export const updateDutyStatus = (data) => request.put('/duty/status', data)

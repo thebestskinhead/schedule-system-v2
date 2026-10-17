@@ -45,6 +45,23 @@ func (h *ScheduleHandler) PreviewSchedule(c *gin.Context) {
 	utils.Success(c, preview)
 }
 
+func (h *ScheduleHandler) GetScheduleCandidates(c *gin.Context) {
+	var req model.CandidateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.Error(c, 400, "参数错误: "+err.Error())
+		return
+	}
+	if !auth.CheckDeptPermission(c, auth.PermScheduleManageDept, req.Department) {
+		return
+	}
+	result, err := h.service.GetScheduleCandidates(&req)
+	if err != nil {
+		utils.Error(c, 500, err.Error())
+		return
+	}
+	utils.Success(c, result)
+}
+
 func (h *ScheduleHandler) ConfirmSchedule(c *gin.Context) {
 	adminID := auth.GetUserIDFromContext(c)
 	if adminID == 0 {
@@ -127,14 +144,7 @@ func (h *ScheduleHandler) UpdateDutyStatus(c *gin.Context) {
 func (h *ScheduleHandler) GetScheduleSettings(c *gin.Context) {
 	settings, err := h.service.GetScheduleSettings()
 	if err != nil {
-		// 返回默认设置
-		utils.Success(c, model.ScheduleSettings{
-			NeedPerCell: 2,
-			MinPerCell:  0,
-			MaxPerDay:   1,
-			MaxPerWeek:  2,
-			ExportTitle: "第{week}周排班表",
-		})
+		utils.Error(c, 500, "读取排班设置失败")
 		return
 	}
 	utils.Success(c, settings)
@@ -312,7 +322,7 @@ func (h *ScheduleHandler) UpdateCurrentWeek(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.UpdateCurrentWeek(adminID, req.CurrentWeek, req.AutoIncrement); err != nil {
+	if err := h.service.UpdateCurrentWeek(adminID, req.CurrentWeek); err != nil {
 		utils.Error(c, 500, err.Error())
 		return
 	}
@@ -346,13 +356,10 @@ func (h *ScheduleHandler) GetSemesterStartDate(c *gin.Context) {
 		return
 	}
 
-	// 获取当前周次
-	currentWeek := 1
-	if startDate != nil && *startDate != "" {
-		week, err := h.service.CalculateCurrentWeek(*startDate)
-		if err == nil {
-			currentWeek = week
-		}
+	currentWeek, _, err := h.service.GetCurrentWeek()
+	if err != nil {
+		utils.Error(c, 500, err.Error())
+		return
 	}
 
 	response := model.SemesterStartDateResponse{

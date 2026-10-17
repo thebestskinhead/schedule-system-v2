@@ -211,7 +211,8 @@ CREATE TABLE `schedule_settings` (
   `config_key` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'global' COMMENT '单例键',
   `admin_id` int DEFAULT '1' COMMENT '最后修改者ID',
   `current_week` int DEFAULT '1' COMMENT '当前周次',
-  `auto_increment` tinyint(1) DEFAULT '0' COMMENT '是否自动递增周次',
+  `auto_increment` tinyint(1) DEFAULT '1' COMMENT '周次始终自动递增',
+  `current_week_set_at` date DEFAULT NULL COMMENT '手动周次的起算日期',
   `need_per_cell` int DEFAULT '2',
   `min_per_cell` int DEFAULT '0',
   `max_per_day` int DEFAULT '1',
@@ -448,7 +449,7 @@ ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description);
 
 -- 排班设置单例行（config_key='global'）
 INSERT IGNORE INTO schedule_settings (config_key, admin_id, current_week, auto_increment, need_per_cell, min_per_cell, max_per_day, max_per_week, export_title, semester_start_date)
-VALUES ('global', 1, 1, 0, 2, 0, 1, 2, '第{week}周排班表', NULL);
+VALUES ('global', 1, 1, 1, 2, 0, 1, 2, '第{week}周排班表', NULL);
 
 
 -- ============================================================

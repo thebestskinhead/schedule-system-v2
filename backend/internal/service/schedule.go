@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"math/rand"
@@ -242,35 +243,35 @@ func (s *ScheduleService) PreviewSchedule(req *model.ScheduleRequest) (*model.Sc
 						continue
 					}
 
-						// 检查是否因 MaxPerWeek/MaxPerDay 被过滤（本周/当天计数以本地累计为准）
-						if int64(previewWeekCount[uid]) >= int64(req.MaxPerWeek) {
-							// 被 MaxPerWeek 过滤，检查是否已排 >= 2
-							if previewWeekCount[uid] >= 2 {
-								// 尝试撤销其旧班（优先同天）
-								if s.tryRevokeAndAssign(grid, uid, cf.Weekday, cf.Period, previewWeekCount, previewDayCount, counts, req, userMap) {
-									found = true
-									improved = true
-									break
-								}
+					// 检查是否因 MaxPerWeek/MaxPerDay 被过滤（本周/当天计数以本地累计为准）
+					if int64(previewWeekCount[uid]) >= int64(req.MaxPerWeek) {
+						// 被 MaxPerWeek 过滤，检查是否已排 >= 2
+						if previewWeekCount[uid] >= 2 {
+							// 尝试撤销其旧班（优先同天）
+							if s.tryRevokeAndAssign(grid, uid, cf.Weekday, cf.Period, previewWeekCount, previewDayCount, counts, req, userMap) {
+								found = true
+								improved = true
+								break
 							}
-							continue
 						}
+						continue
+					}
 
-						prevDay := int64(0)
-						if previewDayCount[uid] != nil {
-							prevDay = int64(previewDayCount[uid][cf.Weekday])
-						}
-						if prevDay >= int64(req.MaxPerDay) {
-							// 被 MaxPerDay 过滤，检查是否已排 >= 2
-							if previewWeekCount[uid] >= 2 {
-								if s.tryRevokeAndAssign(grid, uid, cf.Weekday, cf.Period, previewWeekCount, previewDayCount, counts, req, userMap) {
-									found = true
-									improved = true
-									break
-								}
+					prevDay := int64(0)
+					if previewDayCount[uid] != nil {
+						prevDay = int64(previewDayCount[uid][cf.Weekday])
+					}
+					if prevDay >= int64(req.MaxPerDay) {
+						// 被 MaxPerDay 过滤，检查是否已排 >= 2
+						if previewWeekCount[uid] >= 2 {
+							if s.tryRevokeAndAssign(grid, uid, cf.Weekday, cf.Period, previewWeekCount, previewDayCount, counts, req, userMap) {
+								found = true
+								improved = true
+								break
 							}
-							continue
 						}
+						continue
+					}
 				}
 
 				if !found {
@@ -342,6 +343,11 @@ func (s *ScheduleService) tryRevokeAndAssign(
 	req *model.ScheduleRequest,
 	userMap map[int]model.User,
 ) bool {
+	for _, user := range grid[targetWeekday-1][targetPeriod-1].Users {
+		if user.ID == uid {
+			return false
+		}
+	}
 	// 优先撤销同天的旧班
 	for p := 1; p <= 4; p++ {
 		if p == targetPeriod {
@@ -355,21 +361,24 @@ func (s *ScheduleService) tryRevokeAndAssign(
 				previewWeekCount[uid]--
 				previewDayCount[uid][targetWeekday]--
 
-							// 填入目标空档
-							targetCell := &grid[targetWeekday-1][targetPeriod-1]
-							if u, ok := userMap[uid]; ok {
-								targetCell.Users = append(targetCell.Users, u)
-							} else {
-								targetCell.Users = append(targetCell.Users, model.User{ID: uid})
-							}
-							previewWeekCount[uid]++
-							previewDayCount[uid][targetWeekday]++
-							return true
+				// 填入目标空档
+				targetCell := &grid[targetWeekday-1][targetPeriod-1]
+				if u, ok := userMap[uid]; ok {
+					targetCell.Users = append(targetCell.Users, u)
+				} else {
+					targetCell.Users = append(targetCell.Users, model.User{ID: uid})
+				}
+				previewWeekCount[uid]++
+				previewDayCount[uid][targetWeekday]++
+				return true
 			}
 		}
 	}
 
 	// 同天没有，尝试撤销其他天的旧班
+	if previewDayCount[uid][targetWeekday] >= req.MaxPerDay {
+		return false
+	}
 	for wd := 1; wd <= 5; wd++ {
 		if wd == targetWeekday {
 			continue
@@ -389,18 +398,18 @@ func (s *ScheduleService) tryRevokeAndAssign(
 					previewWeekCount[uid]--
 					previewDayCount[uid][wd]--
 
-						targetCell := &grid[targetWeekday-1][targetPeriod-1]
-						if u, ok := userMap[uid]; ok {
-							targetCell.Users = append(targetCell.Users, u)
-						} else {
-							targetCell.Users = append(targetCell.Users, model.User{ID: uid})
-						}
-						previewWeekCount[uid]++
-						if previewDayCount[uid] == nil {
-							previewDayCount[uid] = make(map[int]int)
-						}
-						previewDayCount[uid][targetWeekday]++
-						return true
+					targetCell := &grid[targetWeekday-1][targetPeriod-1]
+					if u, ok := userMap[uid]; ok {
+						targetCell.Users = append(targetCell.Users, u)
+					} else {
+						targetCell.Users = append(targetCell.Users, model.User{ID: uid})
+					}
+					previewWeekCount[uid]++
+					if previewDayCount[uid] == nil {
+						previewDayCount[uid] = make(map[int]int)
+					}
+					previewDayCount[uid][targetWeekday]++
+					return true
 				}
 			}
 		}
@@ -412,6 +421,9 @@ func (s *ScheduleService) tryRevokeAndAssign(
 func (s *ScheduleService) ConfirmSchedule(adminID int, req *model.ConfirmScheduleRequest) error {
 	if len(req.Cells) == 0 {
 		return errors.New("无排班数据")
+	}
+	if err := s.validateSchedule(req); err != nil {
+		return err
 	}
 
 	// 序列化与 sp_confirm_schedule 的 JSON_TABLE 解析字段一致：weekday/period/user_ids
@@ -431,36 +443,7 @@ func (s *ScheduleService) ConfirmSchedule(adminID int, req *model.ConfirmSchedul
 		return err
 	}
 
-	// 同步当前周次（自动计算或递增）
-	s.SyncCurrentWeek()
-
 	return nil
-}
-
-// SyncCurrentWeek 同步当前周次
-// 若存在学期起始日且开启自动计算，将 current_week 同步为计算值；
-// 若无学期起始日且开启自动计算，则 current_week + 1。
-func (s *ScheduleService) SyncCurrentWeek() error {
-	settings, err := s.dutyDAO.GetScheduleSettings()
-	if err != nil || settings == nil {
-		return nil
-	}
-
-	if !settings.AutoIncrement {
-		return nil
-	}
-
-	// 有学期起始日：同步为基于日期的计算值
-	if settings.SemesterStartDate != nil && !settings.SemesterStartDate.IsZero() {
-		week, err := s.CalculateCurrentWeek(settings.SemesterStartDate.Format("2006-01-02"))
-		if err != nil {
-			return err
-		}
-		return s.dutyDAO.UpdateCurrentWeekDirect(week)
-	}
-
-	// 无学期起始日：原有递增逻辑
-	return s.dutyDAO.IncrementCurrentWeek()
 }
 
 func (s *ScheduleService) GetScheduleByWeek(week int) ([]model.DutyRecordWithUser, error) {
@@ -495,12 +478,31 @@ func (s *ScheduleService) UpdateDutyStatus(userID int, dutyID int, status string
 
 // GetScheduleSettings 获取排班设置
 func (s *ScheduleService) GetScheduleSettings() (*model.ScheduleSettings, error) {
-	return s.dutyDAO.GetScheduleSettings()
+	settings, err := s.dutyDAO.GetScheduleSettings()
+	if errors.Is(err, sql.ErrNoRows) {
+		return &model.ScheduleSettings{CurrentWeek: 1, AutoIncrement: true, NeedPerCell: 2, MaxPerDay: 1, MaxPerWeek: 2, ExportTitle: "第{week}周排班表"}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	settings.CurrentWeek = currentWeekAt(settings, time.Now())
+	settings.AutoIncrement = true
+	return settings, nil
 }
 
 // SaveScheduleSettings 保存排班设置
 func (s *ScheduleService) SaveScheduleSettings(adminID int, settings *model.ScheduleSettings) error {
 	settings.AdminID = adminID
+	if settings.CurrentWeek < 1 || settings.CurrentWeek > 30 {
+		return errors.New("当前周次必须在1到30之间")
+	}
+	existing, err := s.dutyDAO.GetScheduleSettings()
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	anchor := weekAnchor(existing, time.Now())
+	settings.CurrentWeekSetAt = &anchor
+	settings.AutoIncrement = true
 	return s.dutyDAO.SaveScheduleSettings(settings)
 }
 
@@ -531,32 +533,25 @@ func (s *ScheduleService) UpdateSchedule(adminID int, req *model.UpdateScheduleR
 }
 
 // GetCurrentWeek 获取当前周次
-// 当 auto_increment=1 且存在学期起始日时，基于日期实时计算；
-// 否则返回数据库中存储的固定 current_week。
+// 所有页面共享日期计算结果，手动校准优先于学期起始日。
 func (s *ScheduleService) GetCurrentWeek() (int, bool, error) {
-	settings, err := s.dutyDAO.GetScheduleSettings()
-	if err != nil || settings == nil {
-		return 1, false, nil
+	settings, err := s.GetScheduleSettings()
+	if err != nil {
+		return 0, true, err
 	}
-
-	if settings.AutoIncrement && settings.SemesterStartDate != nil && !settings.SemesterStartDate.IsZero() {
-		week, err := s.CalculateCurrentWeek(settings.SemesterStartDate.Format("2006-01-02"))
-		if err == nil && week > 0 {
-			return week, settings.AutoIncrement, nil
-		}
-	}
-
-	return settings.CurrentWeek, settings.AutoIncrement, nil
+	return settings.CurrentWeek, true, nil
 }
 
 // UpdateCurrentWeek 更新当前周次
-func (s *ScheduleService) UpdateCurrentWeek(adminID int, currentWeek int, autoIncrement bool) error {
-	return s.dutyDAO.UpdateCurrentWeek(adminID, currentWeek, autoIncrement)
-}
-
-// IncrementCurrentWeek 当前周次自动递增
-func (s *ScheduleService) IncrementCurrentWeek() error {
-	return s.dutyDAO.IncrementCurrentWeek()
+func (s *ScheduleService) UpdateCurrentWeek(adminID int, currentWeek int) error {
+	if currentWeek < 1 || currentWeek > 30 {
+		return errors.New("当前周次必须在1到30之间")
+	}
+	settings, err := s.dutyDAO.GetScheduleSettings()
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	return s.dutyDAO.UpdateCurrentWeek(adminID, currentWeek, weekAnchor(settings, time.Now()))
 }
 
 // GetSemesterStartDate 获取学期起始日
@@ -566,6 +561,9 @@ func (s *ScheduleService) GetSemesterStartDate() (*string, error) {
 
 // UpdateSemesterStartDate 更新学期起始日
 func (s *ScheduleService) UpdateSemesterStartDate(adminID int, startDate string) error {
+	if _, err := time.Parse("2006-01-02", startDate); err != nil {
+		return errors.New("学期起始日格式错误")
+	}
 	return s.dutyDAO.UpdateSemesterStartDate(adminID, startDate)
 }
 
@@ -575,14 +573,5 @@ func (s *ScheduleService) CalculateCurrentWeek(startDate string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	now := time.Now()
-	days := int(now.Sub(start).Hours() / 24)
-	if days < 0 {
-		return 1, nil
-	}
-	week := days/7 + 1
-	if week > 30 {
-		return 30, nil
-	}
-	return week, nil
+	return currentWeekAt(&model.ScheduleSettings{SemesterStartDate: &start}, time.Now()), nil
 }

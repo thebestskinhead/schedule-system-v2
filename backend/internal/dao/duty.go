@@ -1,9 +1,12 @@
 package dao
 
 import (
+	"database/sql"
+	"errors"
 	"github.com/jmoiron/sqlx"
 	"schedule-system-v2/backend/internal/db"
 	"schedule-system-v2/backend/internal/model"
+	"time"
 )
 
 type DutyDAO struct{}
@@ -13,7 +16,7 @@ func NewDutyDAO() *DutyDAO {
 }
 
 func (d *DutyDAO) Create(record *model.DutyRecord) error {
-	query := `INSERT IGNORE INTO duty_records (week, weekday, period, user_id, assigned_by, status) 
+	query := `INSERT IGNORE INTO duty_records (week, weekday, period, user_id, assigned_by, status)
 		VALUES (?, ?, ?, ?, ?, ?)`
 	result, err := db.GetDB().Exec(query, record.Week, record.Weekday, record.Period, record.UserID, record.AssignedBy, record.Status)
 	if err != nil {
@@ -28,7 +31,7 @@ func (d *DutyDAO) CreateBatch(records []model.DutyRecord) error {
 	if len(records) == 0 {
 		return nil
 	}
-	query := `INSERT IGNORE INTO duty_records (week, weekday, period, user_id, assigned_by, status) 
+	query := `INSERT IGNORE INTO duty_records (week, weekday, period, user_id, assigned_by, status)
 		VALUES (:week, :weekday, :period, :user_id, :assigned_by, :status)`
 	_, err := db.GetDB().NamedExec(query, records)
 	return err
@@ -43,9 +46,9 @@ func (d *DutyDAO) GetByID(id int) (*model.DutyRecord, error) {
 
 func (d *DutyDAO) GetByWeek(week int) ([]model.DutyRecordWithUser, error) {
 	var list []model.DutyRecordWithUser
-	query := `SELECT dr.id, dr.week, dr.weekday, dr.period, dr.user_id, dr.assigned_by, dr.status, dr.remark, dr.created_at, dr.updated_at, u.student_id, u.name as user_name 
-		FROM duty_records dr 
-		JOIN users u ON dr.user_id = u.id 
+	query := `SELECT dr.id, dr.week, dr.weekday, dr.period, dr.user_id, dr.assigned_by, dr.status, dr.remark, dr.created_at, dr.updated_at, u.student_id, u.name as user_name
+		FROM duty_records dr
+		JOIN users u ON dr.user_id = u.id
 		WHERE dr.week = ? AND u.employment_status = 'active'
 		ORDER BY dr.weekday, dr.period, u.id`
 	err := db.GetDB().Select(&list, query, week)
@@ -54,9 +57,9 @@ func (d *DutyDAO) GetByWeek(week int) ([]model.DutyRecordWithUser, error) {
 
 func (d *DutyDAO) GetByWeekAndDepartment(week int, department string) ([]model.DutyRecordWithUser, error) {
 	var list []model.DutyRecordWithUser
-	query := `SELECT dr.id, dr.week, dr.weekday, dr.period, dr.user_id, dr.assigned_by, dr.status, dr.remark, dr.created_at, dr.updated_at, u.student_id, u.name as user_name 
-		FROM duty_records dr 
-		JOIN users u ON dr.user_id = u.id 
+	query := `SELECT dr.id, dr.week, dr.weekday, dr.period, dr.user_id, dr.assigned_by, dr.status, dr.remark, dr.created_at, dr.updated_at, u.student_id, u.name as user_name
+		FROM duty_records dr
+		JOIN users u ON dr.user_id = u.id
 		WHERE dr.week = ? AND u.department = ? AND u.employment_status = 'active'
 		ORDER BY dr.weekday, dr.period, u.id`
 	err := db.GetDB().Select(&list, query, week, department)
@@ -65,9 +68,9 @@ func (d *DutyDAO) GetByWeekAndDepartment(week int, department string) ([]model.D
 
 func (d *DutyDAO) GetByUserID(userID int) ([]model.DutyRecordWithUser, error) {
 	var list []model.DutyRecordWithUser
-	query := `SELECT dr.id, dr.week, dr.weekday, dr.period, dr.user_id, dr.assigned_by, dr.status, dr.remark, dr.created_at, dr.updated_at, u.student_id, u.name as user_name 
-		FROM duty_records dr 
-		JOIN users u ON dr.user_id = u.id 
+	query := `SELECT dr.id, dr.week, dr.weekday, dr.period, dr.user_id, dr.assigned_by, dr.status, dr.remark, dr.created_at, dr.updated_at, u.student_id, u.name as user_name
+		FROM duty_records dr
+		JOIN users u ON dr.user_id = u.id
 		WHERE dr.user_id = ? AND u.employment_status = 'active'
 		ORDER BY dr.week, dr.weekday, dr.period`
 	err := db.GetDB().Select(&list, query, userID)
@@ -173,81 +176,58 @@ func (d *DutyDAO) GetScheduleSettings() (*model.ScheduleSettings, error) {
 
 // SaveScheduleSettings 保存排班设置（全局唯一记录）
 func (d *DutyDAO) SaveScheduleSettings(settings *model.ScheduleSettings) error {
-	query := `INSERT INTO schedule_settings (config_key, admin_id, current_week, auto_increment, need_per_cell, min_per_cell, max_per_day, max_per_week, export_title, semester_start_date, created_at, updated_at) 
-		VALUES ('global', :admin_id, :current_week, :auto_increment, :need_per_cell, :min_per_cell, :max_per_day, :max_per_week, :export_title, :semester_start_date, NOW(), NOW())
-		ON DUPLICATE KEY UPDATE 
-		admin_id = :admin_id, current_week = :current_week, auto_increment = :auto_increment, need_per_cell = :need_per_cell, 
-		min_per_cell = :min_per_cell, max_per_day = :max_per_day, max_per_week = :max_per_week, 
-		export_title = :export_title, semester_start_date = :semester_start_date, updated_at = NOW()`
-	_, err := db.GetDB().NamedExec(query, settings)
+	query := `INSERT INTO schedule_settings (config_key, admin_id, current_week, current_week_set_at, auto_increment, need_per_cell, min_per_cell, max_per_day, max_per_week, export_title, created_at, updated_at)
+		VALUES ('global', :admin_id, :current_week, :current_week_set_at, 1, :need_per_cell, :min_per_cell, :max_per_day, :max_per_week, :export_title, NOW(), NOW())
+		ON DUPLICATE KEY UPDATE
+		admin_id = :admin_id, current_week = :current_week, current_week_set_at = :current_week_set_at, auto_increment = 1, need_per_cell = :need_per_cell,
+		min_per_cell = :min_per_cell, max_per_day = :max_per_day, max_per_week = :max_per_week,
+		export_title = :export_title, updated_at = NOW()`
+	var anchor interface{}
+	if settings.CurrentWeekSetAt != nil {
+		anchor = settings.CurrentWeekSetAt.Format("2006-01-02")
+	}
+	_, err := db.GetDB().NamedExec(query, map[string]interface{}{
+		"admin_id": settings.AdminID, "current_week": settings.CurrentWeek, "current_week_set_at": anchor,
+		"need_per_cell": settings.NeedPerCell, "min_per_cell": settings.MinPerCell,
+		"max_per_day": settings.MaxPerDay, "max_per_week": settings.MaxPerWeek, "export_title": settings.ExportTitle,
+	})
 	return err
-}
-
-// GetCurrentWeek 获取当前周次（全局唯一记录）
-func (d *DutyDAO) GetCurrentWeek() (int, bool, error) {
-	var result struct {
-		CurrentWeek   int `db:"current_week"`
-		AutoIncrement int `db:"auto_increment"`
-	}
-	query := `SELECT current_week, auto_increment FROM schedule_settings WHERE config_key = 'global'`
-	err := db.GetDB().Get(&result, query)
-	if err != nil {
-		// 如果没有设置，返回默认值
-		return 1, false, nil
-	}
-	return result.CurrentWeek, result.AutoIncrement == 1, nil
 }
 
 // UpdateCurrentWeek 更新当前周次（全局唯一记录）
-func (d *DutyDAO) UpdateCurrentWeek(adminID int, currentWeek int, autoIncrement bool) error {
-	autoIncVal := 0
-	if autoIncrement {
-		autoIncVal = 1
-	}
-	query := `INSERT INTO schedule_settings (config_key, admin_id, current_week, auto_increment, need_per_cell, min_per_cell, max_per_day, max_per_week, export_title, semester_start_date, created_at, updated_at) 
-		VALUES ('global', ?, ?, ?, 2, 0, 1, 2, '第{week}周排班表', NULL, NOW(), NOW())
-		ON DUPLICATE KEY UPDATE 
-		admin_id = ?, current_week = ?, auto_increment = ?, updated_at = NOW()`
-	_, err := db.GetDB().Exec(query, adminID, currentWeek, autoIncVal, adminID, currentWeek, autoIncVal)
-	return err
-}
-
-// IncrementCurrentWeek 当前周次自动递增（仅在没有学期起始日时生效）
-func (d *DutyDAO) IncrementCurrentWeek() error {
-	query := `UPDATE schedule_settings SET current_week = current_week + 1, updated_at = NOW() 
-		WHERE config_key = 'global' AND auto_increment = 1 AND current_week < 30 AND (semester_start_date IS NULL OR semester_start_date = '')`
-	_, err := db.GetDB().Exec(query)
-	return err
-}
-
-// UpdateCurrentWeekDirect 直接更新当前周次（用于同步计算值）
-func (d *DutyDAO) UpdateCurrentWeekDirect(currentWeek int) error {
-	query := `UPDATE schedule_settings SET current_week = ?, updated_at = NOW() WHERE config_key = 'global'`
-	_, err := db.GetDB().Exec(query, currentWeek)
+func (d *DutyDAO) UpdateCurrentWeek(adminID int, currentWeek int, anchor time.Time) error {
+	query := `INSERT INTO schedule_settings (config_key, admin_id, current_week, current_week_set_at, auto_increment, need_per_cell, min_per_cell, max_per_day, max_per_week, export_title, semester_start_date, created_at, updated_at)
+		VALUES ('global', ?, ?, ?, 1, 2, 0, 1, 2, '第{week}周排班表', NULL, NOW(), NOW())
+		ON DUPLICATE KEY UPDATE
+		admin_id = VALUES(admin_id), current_week = VALUES(current_week), current_week_set_at = VALUES(current_week_set_at), auto_increment = 1, updated_at = NOW()`
+	_, err := db.GetDB().Exec(query, adminID, currentWeek, anchor.Format("2006-01-02"))
 	return err
 }
 
 // GetSemesterStartDate 获取学期起始日（全局唯一记录）
 func (d *DutyDAO) GetSemesterStartDate() (*string, error) {
 	var result struct {
-		SemesterStartDate *string `db:"semester_start_date"`
+		SemesterStartDate *time.Time `db:"semester_start_date"`
 	}
 	query := `SELECT semester_start_date FROM schedule_settings WHERE config_key = 'global'`
 	err := db.GetDB().Get(&result, query)
-	if err != nil {
-		// 如果没有设置，返回nil
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && result.SemesterStartDate == nil) {
 		return nil, nil
 	}
-	return result.SemesterStartDate, nil
+	if err != nil {
+		return nil, err
+	}
+	date := result.SemesterStartDate.Format("2006-01-02")
+	return &date, nil
 }
 
 // UpdateSemesterStartDate 更新学期起始日（全局唯一记录）
 func (d *DutyDAO) UpdateSemesterStartDate(adminID int, startDate string) error {
 	// 默认开启自动计算（auto_increment=1），已存在记录时更新学期起始日和修改者
-	query := `INSERT INTO schedule_settings (config_key, admin_id, current_week, auto_increment, need_per_cell, min_per_cell, max_per_day, max_per_week, export_title, semester_start_date, created_at, updated_at) 
+	query := `INSERT INTO schedule_settings (config_key, admin_id, current_week, auto_increment, need_per_cell, min_per_cell, max_per_day, max_per_week, export_title, semester_start_date, created_at, updated_at)
 		VALUES ('global', ?, 1, 1, 2, 0, 1, 2, '第{week}周排班表', ?, NOW(), NOW())
-		ON DUPLICATE KEY UPDATE 
-		admin_id = ?, semester_start_date = ?, updated_at = NOW()`
+		ON DUPLICATE KEY UPDATE
+		admin_id = ?, semester_start_date = ?, current_week_set_at = NULL, auto_increment = 1, updated_at = NOW()`
 	_, err := db.GetDB().Exec(query, adminID, startDate, adminID, startDate)
 	return err
 }

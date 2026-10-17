@@ -51,7 +51,7 @@ func buildRoutes(h *Handlers) []RouteDef {
 		{Method: "GET", Path: "/smtp/check", Handler: h.SMTP.CheckConfig},
 		{Method: "POST", Path: "/password/reset-request", Handler: h.SMTP.SendPasswordReset},
 		{Method: "GET", Path: "/password/reset-verify", Handler: h.SMTP.VerifyResetToken},
-			{Method: "POST", Path: "/password/reset", Handler: h.SMTP.ResetPassword},
+		{Method: "POST", Path: "/password/reset", Handler: h.SMTP.ResetPassword},
 
 		{Method: "POST", Path: "/user/login", Handler: h.User.Login},
 
@@ -126,6 +126,7 @@ func buildRoutes(h *Handlers) []RouteDef {
 
 		// ========== 排班管理 ==========
 		{Method: "POST", Path: "/admin/schedule/preview", Auth: true, Perms: []auth.Permission{auth.PermSchedulePreview}, Handler: h.Schedule.PreviewSchedule},
+		{Method: "POST", Path: "/admin/schedule/candidates", Auth: true, Perms: []auth.Permission{auth.PermSchedulePreview}, Handler: h.Schedule.GetScheduleCandidates},
 		{Method: "POST", Path: "/admin/schedule/confirm", Auth: true, Perms: []auth.Permission{auth.PermScheduleConfirm}, Handler: h.Schedule.ConfirmSchedule},
 		{Method: "GET", Path: "/admin/schedule/settings", Auth: true, Perms: []auth.Permission{auth.PermScheduleSettings}, Handler: h.Schedule.GetScheduleSettings},
 		{Method: "POST", Path: "/admin/schedule/settings", Auth: true, Perms: []auth.Permission{auth.PermScheduleSettings}, Handler: h.Schedule.SaveScheduleSettings},
@@ -170,7 +171,7 @@ func buildRoutes(h *Handlers) []RouteDef {
 		{Method: "POST", Path: "/admin/update/start", Auth: true, Perms: []auth.Permission{auth.PermSystemAdmin}, Handler: h.Update.StartUpdate},
 		{Method: "GET", Path: "/admin/update/status", Auth: true, Perms: []auth.Permission{auth.PermSystemAdmin}, Handler: h.Update.GetUpdateStatus},
 		{Method: "GET", Path: "/admin/update/log", Auth: true, Perms: []auth.Permission{auth.PermSystemAdmin}, Handler: h.Update.UpdateLogTail},
-		}
+	}
 
 	// ========== 应用系统（申请/审批） ==========
 	routes = append(routes,

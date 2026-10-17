@@ -13,6 +13,8 @@ export const saveScheduleSettings = (data) => request.post('/admin/schedule/sett
 export const updateSchedule = (data) => request.post('/admin/schedule/update', data)
 export const exportToExcel = (data) => request.post('/admin/schedule/export', data, { responseType: 'blob' })
 
+export const getScheduleCandidates = (data) => request.post('/admin/schedule/candidates', data)
+
 // 值班相关
 export const getMyDuties = () => request.get('/duty/my')
 export const updateDutyStatus = (data) => request.put('/duty/status', data)

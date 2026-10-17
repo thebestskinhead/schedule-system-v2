@@ -273,7 +273,7 @@ func (s *SystemService) executeInitSQL(database *sql.DB) error {
 		config_key VARCHAR(20) NOT NULL DEFAULT 'global' COMMENT '单例键',
 		admin_id INT DEFAULT 1 COMMENT '最后修改者ID',
 		current_week INT DEFAULT 1 COMMENT '当前周次',
-		auto_increment TINYINT(1) DEFAULT 0 COMMENT '是否自动递增周次',
+		auto_increment TINYINT(1) DEFAULT 1 COMMENT '周次始终自动递增',
 		need_per_cell INT DEFAULT 2,
 		min_per_cell INT DEFAULT 0,
 		max_per_day INT DEFAULT 1,
@@ -291,9 +291,12 @@ func (s *SystemService) executeInitSQL(database *sql.DB) error {
 
 	// 排班设置单例行（幂等）
 	_, err = database.Exec(`INSERT IGNORE INTO schedule_settings (config_key, admin_id, current_week, auto_increment, need_per_cell, min_per_cell, max_per_day, max_per_week, export_title, semester_start_date)
-		VALUES ('global', 1, 1, 0, 2, 0, 1, 2, '第{week}周排班表', NULL)`)
+		VALUES ('global', 1, 1, 1, 2, 0, 1, 2, '第{week}周排班表', NULL)`)
 	if err != nil {
 		return fmt.Errorf("插入schedule_settings单例行失败: %v", err)
+	}
+	if err := db.EnsureScheduleWeekSchema(database); err != nil {
+		return fmt.Errorf("升级周次设置失败: %w", err)
 	}
 
 	// 导出模板表
@@ -839,13 +842,13 @@ func (s *SystemService) CreateAdmin(studentID, name, email, password, department
 	}
 
 	return &model.User{
-		ID:         int(userID),
-		StudentID:  studentID,
-		Name:       name,
-		Email:      email,
-		Role:       model.RoleAdmin,
-		Department: department,
-		DeptRole:   model.RoleDeptAdmin,
+		ID:               int(userID),
+		StudentID:        studentID,
+		Name:             name,
+		Email:            email,
+		Role:             model.RoleAdmin,
+		Department:       department,
+		DeptRole:         model.RoleDeptAdmin,
 		EmploymentStatus: model.EmploymentStatusActive,
 	}, nil
 }

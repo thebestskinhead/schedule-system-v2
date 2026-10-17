@@ -49,7 +49,7 @@
       </div>
       <div class="help-content">
         <p><strong>学期起始日：</strong>设置本学期第一周的周一日期。</p>
-        <p><strong>当前周次：</strong>系统根据学期起始日和当前日期自动计算。</p>
+        <p><strong>当前周次：</strong>始终自动递增，可在首页或排班参数中手动校准。重新保存学期起始日将清除校准，按该日期重新计算。</p>
         <p><strong>示例：</strong>如果学期从2024年9月2日开始，今天是9月16日，则当前为第3周。</p>
         <van-divider />
         <p><strong>快捷设置：</strong></p>

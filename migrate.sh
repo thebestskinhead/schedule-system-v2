@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# migrate.sh —— 从 V1 结构迁移到 V2.1（执行 011 → 012 → 013 → 014）
+# migrate.sh —— 从 V1 结构迁移到 V2.1（执行 011 → 012 → 013 → 014 → 015）
 #
 # 用法：
 #   1) 默认：读取 backend/configs/config.yaml 中的 database 段
@@ -20,6 +20,7 @@
 #        backend/migrations/012_add_hr_tables.sql
 #        backend/migrations/013_add_db_logic.sql
 #        backend/migrations/014_fix_temp_perm_reason.sql
+#        backend/migrations/015_fix_current_week.sql
 #      任一步骤失败立即 exit 1 中止。
 # =============================================================================
 
@@ -94,8 +95,8 @@ rm -f "${BACKUP_DIR}/.err"
 echo "  备份完成。"
 
 echo
-echo ">>> [2/2] 执行迁移 011 -> 012 -> 013 -> 014"
-for f in 011_optimize_schema.sql 012_add_hr_tables.sql 013_add_db_logic.sql 014_fix_temp_perm_reason.sql; do
+echo ">>> [2/2] 执行迁移 011 -> 012 -> 013 -> 014 -> 015"
+for f in 011_optimize_schema.sql 012_add_hr_tables.sql 013_add_db_logic.sql 014_fix_temp_perm_reason.sql 015_fix_current_week.sql; do
   src="${SCRIPT_DIR}/backend/migrations/${f}"
   echo "  - 执行 ${f}"
   if ! "$MYSQL" "${CONN_ARGS[@]}" "$DB_NAME" < "$src" 2>"${BACKUP_DIR}/.err"; then

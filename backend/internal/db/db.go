@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"schedule-system-v2/backend/internal/config"
 
-	"github.com/jmoiron/sqlx"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/jmoiron/sqlx"
 )
 
 var DB *sqlx.DB
@@ -35,7 +35,7 @@ func InitDB(cfg *config.DatabaseConfig) error {
 	DB.SetMaxOpenConns(100)
 	DB.SetMaxIdleConns(10)
 
-	return nil
+	return EnsureScheduleWeekSchema(DB.DB)
 }
 
 func GetDB() *sqlx.DB {

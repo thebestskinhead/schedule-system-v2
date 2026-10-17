@@ -166,12 +166,21 @@
     </div>
 
     <!-- 添加人员 -->
-    <el-dialog v-model="addDialogVisible" title="添加值班人员" width="400px">
+    <el-dialog v-model="addDialogVisible" title="添加值班人员" width="620px">
       <p class="mb-4">{{ addForm.weekdayText }} 第{{ addForm.period }}节</p>
-      <el-select-v2 v-model="addForm.users" :options="availableUsers" multiple style="width: 100%" />
+      <p>按当前草稿统计次数；仅允许添加该时段无课且未达到日、周次数上限的成员。</p>
+      <el-alert v-if="candidateError" :title="candidateError" type="error" :closable="false" />
+      <el-button v-if="candidateError" @click="loadCandidates">重新校验</el-button>
+      <el-select v-model="addForm.users" multiple filterable :loading="candidateLoading" :disabled="candidateLoading || !!candidateError" placeholder="选择可添加的成员" style="width: 100%">
+        <el-option v-for="user in availableUsers" :key="user.value" :value="user.value" :label="user.name + ' (' + user.student_id + ')'" :disabled="user.disabled" class="candidate-option">
+          <div>{{ user.name }} ({{ user.student_id }}) · 当日 {{ user.day_count }}/{{ settings.max_per_day }}，本周 {{ user.week_count }}/{{ settings.max_per_week }}</div>
+          <div>{{ user.eligible ? '无课，可添加' : user.reasons.join('；') }}</div>
+        </el-option>
+      </el-select>
+      <el-empty v-if="!candidateLoading && !candidateError && !availableUsers.length" description="该部门暂无可排班成员" />
       <template #footer>
         <el-button @click="addDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="confirmAdd">添加</el-button>
+        <el-button type="primary" @click="confirmAdd" :loading="candidateLoading" :disabled="!addForm.users.length || !!candidateError">添加</el-button>
       </template>
     </el-dialog>
 
@@ -317,12 +326,13 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import * as XLSX from 'xlsx'
 import { useUserStore } from '../stores/user'
 import { 
+  getScheduleCandidates,
   previewSchedule, 
   confirmSchedule as confirmAPI, 
   getScheduleSettings, 
@@ -334,7 +344,7 @@ import {
   updateTemplate as updateTemplateAPI,
   deleteTemplate as deleteTemplateAPI
 } from '../api/schedule'
-import { getUsersForSchedule } from '../api/user'
+import { draftRows, draftCells } from '../utils/scheduleDraft'
 
 const userStore = useUserStore()
 
@@ -345,7 +355,9 @@ const confirming = ref(false)
 const saving = ref(false)
 const exporting = ref(false)
 const previewData = ref(null)
-const allUsers = ref([])
+const candidates = ref([])
+const candidateLoading = ref(false)
+const candidateError = ref('')
 const addDialogVisible = ref(false)
 
 // 模板相关
@@ -476,34 +488,16 @@ const rules = {
 
 const weekOptions = Array.from({ length: 30 }, (_, i) => ({ value: i + 1, label: `第${i + 1}周` }))
 
-const previewList = computed(() => {
-  if (!previewData.value?.grid) return []
-  const list = []
-  for (let d = 0; d < 5; d++) {
-    for (let p = 0; p < 4; p++) {
-      const cell = previewData.value.grid[d]?.[p]
-      if (cell && form.days.includes(d + 1) && p < form.periods) {
-        list.push({ weekday: d + 1, period: p + 1, users: cell.users || [] })
-      }
-    }
-  }
-  return list
-})
+const previewList = computed(() => draftRows(previewData.value, form.days, form.periods))
 
-const conflicts = computed(() => {
-  if (!previewData.value?.conflicts) return []
-  return previewData.value.conflicts.filter(c => form.days.includes(c.weekday) && c.period <= form.periods)
-})
+const conflicts = computed(() => previewList.value.filter(row => row.users.length < settings.min_per_cell))
 
-const availableUsers = computed(() => {
-  if (!addForm.rowData) return []
-  const selected = new Set(addForm.rowData.users.map(u => u.id))
-  return allUsers.value
-    // 仅在职（排除待入职/离职），且排除部门管理员
-    .filter(u => u.employment_status === 'active' && u.dept_role !== 'dept_admin')
-    .filter(u => !selected.has(u.id))
-    .map(u => ({ value: u.id, label: `${u.name} (${u.student_id})` }))
-})
+const availableUsers = computed(() => candidates.value.map(user => ({
+  ...user,
+  value: user.id,
+  disabled: !user.eligible,
+  label: user.name + ' (' + user.student_id + ') · 当日 ' + user.day_count + '/' + settings.max_per_day + '，本周 ' + user.week_count + '/' + settings.max_per_week + ' · ' + (user.eligible ? '无课，可添加' : user.reasons.join('；'))
+})))
 
 // 部门是否锁定（非管理员自动锁定为自己的部门）
 const isDepartmentLocked = computed(() => {
@@ -517,12 +511,6 @@ const loadSettings = async () => {
   } catch {}
 }
 
-const loadUsers = async () => {
-  try {
-    const data = await getUsersForSchedule()
-    allUsers.value = data || []
-  } catch {}
-}
 
 // 加载模板列表
 const loadTemplates = async () => {
@@ -823,6 +811,8 @@ const saveSettings = async () => {
   saving.value = true
   try {
     await saveScheduleSettings(settings)
+    await loadSettings()
+    form.week = settings.current_week
     ElMessage.success('保存成功')
   } catch {}
   saving.value = false
@@ -831,16 +821,8 @@ const saveSettings = async () => {
 const confirmSchedule = async () => {
   confirming.value = true
   try {
-    const cells = []
-    for (let d = 0; d < 5; d++) {
-      for (let p = 0; p < 4; p++) {
-        const cell = previewData.value.grid[d]?.[p]
-        if (cell?.users?.length) {
-          cells.push({ weekday: d + 1, period: p + 1, user_ids: cell.users.map(u => u.id) })
-        }
-      }
-    }
-    await confirmAPI({ week: previewData.value.week, cells })
+    const cells = draftCells(previewData.value)
+    await confirmAPI({ week: previewData.value.week, cells, max_per_day: settings.max_per_day, max_per_week: settings.max_per_week })
     ElMessage.success('排班确认成功')
     router.push('/schedule/result')
   } catch {}
@@ -852,25 +834,69 @@ const removeUser = (row, user) => {
   if (idx > -1) row.users.splice(idx, 1)
 }
 
+const loadCandidates = async () => {
+  const row = addForm.rowData
+  const preview = previewData.value
+  if (!row || !preview) return false
+  candidateLoading.value = true
+  candidateError.value = ''
+  try {
+    const data = await getScheduleCandidates({
+      week: preview.week, department: form.department,
+      weekday: row.weekday, period: row.period,
+      cells: draftCells(preview),
+      max_per_day: settings.max_per_day, max_per_week: settings.max_per_week
+    })
+    if (row !== addForm.rowData || preview !== previewData.value) return false
+    candidates.value = data || []
+    return true
+  } catch {
+    candidates.value = []
+    candidateError.value = '候选人校验失败，请重试'
+    return false
+  } finally {
+    candidateLoading.value = false
+  }
+}
+
 const showAddDialog = (row) => {
   addForm.weekday = row.weekday
   addForm.weekdayText = '周' + ['一', '二', '三', '四', '五'][row.weekday - 1]
   addForm.period = row.period
   addForm.users = []
   addForm.rowData = row
+  candidates.value = []
   addDialogVisible.value = true
+  loadCandidates()
 }
 
-const confirmAdd = () => {
-  addForm.users.forEach(uid => {
-    const user = allUsers.value.find(u => u.id === uid)
-    if (user && !addForm.rowData.users.find(u => u.id === uid)) {
-      addForm.rowData.users.push(user)
-    }
-  })
+const toggleAddUser = (userId) => {
+  if (candidateLoading.value || !candidates.value.find(u => u.id === userId)?.eligible) return
+  const idx = addForm.users.indexOf(userId)
+  if (idx > -1) addForm.users.splice(idx, 1)
+  else addForm.users.push(userId)
+}
+
+const confirmAdd = async () => {
+  if (!addForm.users.length || candidateLoading.value) return
+  if (!await loadCandidates()) return
+  const selected = addForm.users.map(uid => candidates.value.find(u => u.id === uid))
+  if (selected.some(u => !u?.eligible)) {
+    ElMessage.warning('所选人员不符合当前排班规则，请重新选择')
+    addForm.users = []
+    return
+  }
+  addForm.rowData.users.push(...selected.map(u => ({ id: u.id, name: u.name, student_id: u.student_id })))
   addDialogVisible.value = false
   ElMessage.success('添加成功')
 }
+
+// A draft belongs to the selected week, department and time slots.
+watch(() => [form.week, form.department, form.days.join(','), form.periods], () => {
+  previewData.value = null
+  addDialogVisible.value = false
+  addForm.rowData = null
+})
 
 const exportExcel = () => {
   if (!previewData.value) return
@@ -971,8 +997,7 @@ const resetTemplateForm = () => {
 }
 
 onMounted(async () => {
-  loadSettings()
-  loadUsers()
+  await loadSettings()
   loadTemplates()
   // 非管理员默认选择自己部门
   if (!userStore.isAdmin && !userStore.isOfficeAdmin && userStore.user?.department) {
@@ -997,6 +1022,15 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.candidate-option {
+  height: auto;
+  min-height: 54px;
+  line-height: 24px;
+  white-space: normal;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
 .assignment-info {
   padding: 16px;
   background: #f5f7fa;

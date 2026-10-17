@@ -8,7 +8,7 @@
           <el-tag v-if="userStore.isAdmin" type="info" size="small">管理员</el-tag>
         </div>
         <div class="action-bar" v-if="userStore.isAdmin">
-          <el-button size="small" @click="showWeekDialog = true">
+          <el-button size="small" @click="weekForm.currentWeek = currentWeek; showWeekDialog = true">
             <el-icon><Setting /></el-icon> 设置周次
           </el-button>
         </div>
@@ -105,10 +105,7 @@
         <el-form-item label="当前周次">
           <el-input-number v-model="weekForm.currentWeek" :min="1" :max="30" />
         </el-form-item>
-        <el-form-item label="自动递增">
-          <el-switch v-model="weekForm.autoIncrement" />
-          <div class="form-hint">排班确认后自动进入下一周</div>
-        </el-form-item>
+        <p class="form-hint">周次始终随日期自动递增，手动设置后从本周继续计算。</p>
       </el-form>
       <template #footer>
         <el-button @click="showWeekDialog = false">取消</el-button>
@@ -130,7 +127,7 @@ const currentWeek = ref(1)
 const scheduleList = ref([])
 const showWeekDialog = ref(false)
 const saving = ref(false)
-const weekForm = ref({ currentWeek: 1, autoIncrement: false })
+const weekForm = ref({ currentWeek: 1 })
 
 // 快捷入口配置 - 根据用户角色显示不同内容
 const quickItems = computed(() => {
@@ -203,8 +200,7 @@ const saveWeek = async () => {
   saving.value = true
   try {
     await updateCurrentWeek({
-      current_week: weekForm.value.currentWeek,
-      auto_increment: weekForm.value.autoIncrement
+      current_week: weekForm.value.currentWeek
     })
     currentWeek.value = weekForm.value.currentWeek
     ElMessage.success('设置成功')
