@@ -19,6 +19,51 @@ import (
 // 日志与备份目录——热更新只覆盖「前后端构建产物 + 服务可执行文件」。
 var ReplaceTargets = []string{"server.exe", "server", "dist", "dist-mobile"}
 
+// CheckInstallPreconditions 安装前预检（在停止服务之前执行，失败则服务不受影响）：
+// 磁盘剩余空间不少于 2 倍安装包（解压 staging + 备份各约需一份），备份目录可写。
+func CheckInstallPreconditions(dir string, pkgSize int64) error {
+	if err := CheckDiskSpace(dir, 2*pkgSize); err != nil {
+		return err
+	}
+	backupRoot := filepath.Join(dir, "updates", "backup")
+	if err := os.MkdirAll(backupRoot, 0755); err != nil {
+		return fmt.Errorf("创建备份目录失败: %w", err)
+	}
+	probe := filepath.Join(backupRoot, ".write-probe")
+	if err := os.WriteFile(probe, []byte("ok"), 0644); err != nil {
+		return fmt.Errorf("备份目录不可写: %w", err)
+	}
+	_ = os.Remove(probe)
+	return nil
+}
+
+// CheckDiskSpace 检查 dir 所在卷剩余空间是否不少于 need 字节。
+// 取不到磁盘信息时放行（不因平台差异阻断安装）。
+func CheckDiskSpace(dir string, need int64) error {
+	free, err := diskFreeBytes(dir)
+	if err != nil {
+		return nil
+	}
+	if free < need {
+		return fmt.Errorf("磁盘剩余空间不足：需要 %s，可用 %s", humanBytes(need), humanBytes(free))
+	}
+	return nil
+}
+
+// humanBytes 字节数的可读形式（预检错误信息用）
+func humanBytes(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.2f GB", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.2f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
+}
+
 // Backup 将部署物备份到 <dir>/updates/backup/<label>/，返回备份目录路径。
 func Backup(dir, label string) (string, error) {
 	backupDir := filepath.Join(dir, "updates", "backup", label)

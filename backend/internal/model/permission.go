@@ -7,7 +7,8 @@ type Permission string
 
 const (
 	// 系统级权限
-	PermSystemAdmin Permission = "system:admin" // 系统管理
+	PermSystemAdmin  Permission = "system:admin"  // 超级管理员（临时权限清理等）
+	PermSystemManage Permission = "system:manage" // 系统管理（SMTP 服务设置、系统更新）
 
 	// 用户管理权限
 	PermUserProfile    Permission = "user:profile"     // 查看/修改个人信息

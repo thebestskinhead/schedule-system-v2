@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -242,9 +243,42 @@ func DownloadFile(url, dest string, onProgress func(received, total int64)) erro
 	return DownloadFileCancelable(url, dest, onProgress, nil)
 }
 
+// downloadIdleTimeout 下载读空闲超时：超过该时长没有收到任何新数据即中断，
+// 防止网络 stall 时进度假转圈（连接挂死会永久占用下载任务）。
+const downloadIdleTimeout = 120 * time.Second
+
+// directDownloadClient 直连下载客户端：读取环境代理（HTTPS_PROXY），与既有行为一致。
+var directDownloadClient = &http.Client{Timeout: 0}
+
+// mirrorDownloadClient 镜像下载客户端：不走环境代理——镜像地址通常为国内可达，
+// 再走代理反而绕路；代理与镜像互掐时也以此隔离。
+var mirrorDownloadClient = &http.Client{
+	Timeout: 0,
+	Transport: &http.Transport{
+		Proxy:                 nil,
+		ForceAttemptHTTP2:     false,
+		DialContext:           (&net.Dialer{Timeout: 30 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   30 * time.Second,
+		ResponseHeaderTimeout: 60 * time.Second,
+	},
+}
+
 // DownloadFileCancelable 可中止的下载。shouldAbort 返回 true 时立即中断并删除临时文件。
+// 直连地址使用直连客户端（走环境代理）；镜像地址使用镜像客户端（不走代理）。
 func DownloadFileCancelable(url, dest string, onProgress func(received, total int64), shouldAbort func() bool) error {
-	req, err := http.NewRequest("GET", url, nil)
+	return downloadTo(url, dest, onProgress, shouldAbort, directDownloadClient)
+}
+
+// DownloadFileViaMirror 通过镜像地址下载（镜像客户端，不走环境代理）
+func DownloadFileViaMirror(url, dest string, onProgress func(received, total int64), shouldAbort func() bool) error {
+	return downloadTo(url, dest, onProgress, shouldAbort, mirrorDownloadClient)
+}
+
+func downloadTo(url, dest string, onProgress func(received, total int64), shouldAbort func() bool, client *http.Client) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return err
 	}
@@ -252,7 +286,29 @@ func DownloadFileCancelable(url, dest string, onProgress func(received, total in
 	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, err := (&http.Client{Timeout: 0}).Do(req)
+
+	// 读空闲看门狗：超过 downloadIdleTimeout 没有新数据即取消整个下载
+	var lastActivity atomic.Int64
+	lastActivity.Store(time.Now().UnixNano())
+	watchdogDone := make(chan struct{})
+	defer close(watchdogDone)
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-watchdogDone:
+				return
+			case <-ticker.C:
+				if time.Since(time.Unix(0, lastActivity.Load())) > downloadIdleTimeout {
+					cancel() // 中断挂死的连接
+					return
+				}
+			}
+		}
+	}()
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return friendlyNetErr(err)
 	}
@@ -283,6 +339,7 @@ func DownloadFileCancelable(url, dest string, onProgress func(received, total in
 				return fmt.Errorf("写入失败: %w", werr)
 			}
 			received += int64(n)
+			lastActivity.Store(time.Now().UnixNano())
 			if onProgress != nil {
 				onProgress(received, total)
 			}
@@ -293,6 +350,9 @@ func DownloadFileCancelable(url, dest string, onProgress func(received, total in
 		if err != nil {
 			f.Close()
 			os.Remove(tmp)
+			if ctx.Err() != nil {
+				return fmt.Errorf("下载超时：%d 秒内未收到新数据", int(downloadIdleTimeout.Seconds()))
+			}
 			return fmt.Errorf("下载中断: %w", err)
 		}
 	}
@@ -305,6 +365,61 @@ func DownloadFileCancelable(url, dest string, onProgress func(received, total in
 		return err
 	}
 	return nil
+}
+
+// MirrorURL 将镜像地址与 GitHub 原始资产地址拼接为镜像下载地址。
+// 规则（ghproxy 系通用）：最终地址 = TrimSuffix(镜像, "/") + "/" + 原始地址，
+// 如 https://ghfast.top/https://github.com/owner/repo/releases/download/v3.2.0/pkg.zip。
+func MirrorURL(mirror, rawURL string) string {
+	return strings.TrimSuffix(strings.TrimSpace(mirror), "/") + "/" + rawURL
+}
+
+// DownloadWithMirrors 按镜像列表顺序尝试下载并校验；下载失败或校验不符自动切换
+// 下一个镜像重下（防镜像投毒/损坏，宁慢不错）；全部镜像失败后回退直连。
+// verify 为 nil 时跳过校验。返回实际使用的镜像地址（空表示回退了直连）。
+// onAttempt 在每次镜像尝试失败时回调，供调用方记录失败原因。
+func DownloadWithMirrors(rawURL string, mirrors []string, dest string,
+	onProgress func(received, total int64), shouldAbort func() bool,
+	verify func(path string) error, onAttempt func(mirror string, err error)) (string, error) {
+	tryOne := func(url string, viaMirror bool) error {
+		var err error
+		if viaMirror {
+			err = DownloadFileViaMirror(url, dest, onProgress, shouldAbort)
+		} else {
+			err = DownloadFileCancelable(url, dest, onProgress, shouldAbort)
+		}
+		if err != nil {
+			_ = os.Remove(dest)
+			return err
+		}
+		if verify != nil {
+			if verr := verify(dest); verr != nil {
+				_ = os.Remove(dest)
+				return verr
+			}
+		}
+		return nil
+	}
+
+	for _, m := range mirrors {
+		m = strings.TrimSpace(m)
+		if m == "" {
+			continue
+		}
+		if err := tryOne(MirrorURL(m, rawURL), true); err != nil {
+			if onAttempt != nil {
+				onAttempt(m, err)
+			}
+			continue
+		}
+		return m, nil
+	}
+
+	// 全部镜像失败 → 回退直连（走环境代理）
+	if err := tryOne(rawURL, false); err != nil {
+		return "", err
+	}
+	return "", nil
 }
 
 // DownloadChecksum 下载并解析 sha256 校验文件，返回期望的十六进制摘要

@@ -137,7 +137,8 @@ func (h *Handler) GetUserDetail(c *gin.Context) {
 | `schedule:publish` | 发布每周分工 | ✓ | ✓ | ✗ | ✗ |
 | `template:view` | 查看模板 | ✓ | ✓ | ✓ | ✓ |
 | `template:edit` | 编辑模板 | ✓ | ✓ | ✗ | ✗ |
-| `system:admin` | 系统管理 | ✓ | ✗ | ✗ | ✗ |
+| `system:admin` | 系统管理（临时权限清理等） | ✓ | ✗ | ✗ | ✗ |
+| `system:manage` | 系统管理（SMTP 服务设置、系统更新） | ✓ | ✗ | ✗ | ✗ |
 
 ## 在Router中使用中间件
 

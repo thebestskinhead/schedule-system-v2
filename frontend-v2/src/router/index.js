@@ -70,6 +70,12 @@ const routes = [
         meta: { requiresSysAdmin: true }
       },
       {
+        path: 'admin/update',
+        name: 'UpdateManage',
+        component: () => import('../views/UpdateManage.vue'),
+        meta: { requiresSysAdmin: true }
+      },
+      {
         path: 'admin/semester',
         name: 'SemesterSettings',
         component: () => import('../views/SemesterSettings.vue'),

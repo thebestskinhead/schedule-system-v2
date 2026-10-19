@@ -87,8 +87,10 @@ func TestUpdateAdminEndpointsRequireAuth(t *testing.T) {
 	// 且绝不能穿透到业务逻辑（否则会误杀服务/触发下载）。
 	for _, path := range []string{
 		"/api/v1/admin/update/check",
+		"/api/v1/admin/update/progress",
 		"/api/v1/admin/update/status",
 		"/api/v1/admin/update/log",
+		"/api/v1/admin/update/mirrors",
 	} {
 		t.Run(path, func(t *testing.T) {
 			httpCode, _ := getJSON(t, srv.URL+path)
@@ -98,14 +100,34 @@ func TestUpdateAdminEndpointsRequireAuth(t *testing.T) {
 		})
 	}
 
-	// POST 触发更新的接口同样必须拦截
-	resp, err := http.Post(srv.URL+"/api/v1/admin/update/start", "application/json", nil)
-	if err != nil {
-		t.Fatalf("POST 失败: %v", err)
+	// POST 触发下载/安装/取消的接口同样必须拦截
+	for _, path := range []string{
+		"/api/v1/admin/update/download",
+		"/api/v1/admin/update/install",
+		"/api/v1/admin/update/cancel-download",
+	} {
+		resp, err := http.Post(srv.URL+path, "application/json", nil)
+		if err != nil {
+			t.Fatalf("POST %s 失败: %v", path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("POST %s 状态码 = %d, want 401", path, resp.StatusCode)
+		}
 	}
-	defer resp.Body.Close()
+
+	// PUT 保存镜像同样必须拦截
+	req, err := http.NewRequest(http.MethodPut, srv.URL+"/api/v1/admin/update/mirrors", nil)
+	if err != nil {
+		t.Fatalf("构造请求失败: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT /admin/update/mirrors 失败: %v", err)
+	}
+	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("POST /admin/update/start 状态码 = %d, want 401", resp.StatusCode)
+		t.Errorf("PUT /admin/update/mirrors 状态码 = %d, want 401", resp.StatusCode)
 	}
 }
 
@@ -194,7 +216,7 @@ func TestFrontendBackendAPIContract(t *testing.T) {
 		len(calls), len(files))
 }
 
-// TestUpdateRoutesRegistered 更新功能四个接口的方法与路径必须精确登记
+// TestUpdateRoutesRegistered 更新功能接口的方法与路径必须精确登记
 func TestUpdateRoutesRegistered(t *testing.T) {
 	routes := registeredRoutes(t)
 
@@ -202,7 +224,12 @@ func TestUpdateRoutesRegistered(t *testing.T) {
 		"GET /api/v1/system/version",
 		"GET /api/v1/system/health",
 		"GET /api/v1/admin/update/check",
-		"POST /api/v1/admin/update/start",
+		"POST /api/v1/admin/update/download",
+		"GET /api/v1/admin/update/progress",
+		"POST /api/v1/admin/update/cancel-download",
+		"POST /api/v1/admin/update/install",
+		"GET /api/v1/admin/update/mirrors",
+		"PUT /api/v1/admin/update/mirrors",
 		"GET /api/v1/admin/update/status",
 		"GET /api/v1/admin/update/log",
 	}
@@ -211,26 +238,40 @@ func TestUpdateRoutesRegistered(t *testing.T) {
 			t.Errorf("路由未注册: %s", key)
 		}
 	}
+
+	// 旧的一键更新端点（先停服再下载）已被两阶段流程取代，不应残留
+	for _, gone := range []string{"POST /api/v1/admin/update/start"} {
+		if routes[gone] {
+			t.Errorf("路由应已删除: %s", gone)
+		}
+	}
 }
 
-// ==================== 更新程序进度页契约 ====================
+// ==================== 更新程序安装进度页契约 ====================
 //
-// update.exe 的进度页（前端 SMTPConfig.vue 的轮询逻辑）依赖三个端点：
-// GET /api/state、POST /api/abort、POST /api/retry。
+// update.exe 的安装进度页（前端轮询后跳转落地）依赖两个端点：
+// GET /api/state、POST /api/retry。
 // 这些端点由 cmd/updater 提供（不走 gin），这里校验页面 HTML 中的契约。
+// 安装阶段不提供终止入口：/api/abort 与「终止更新」按钮均已移除。
 
 func TestProgressPageEndpointsContract(t *testing.T) {
 	html := readUpdaterPageHTML(t)
 
-	for _, ep := range []string{"/api/state", "/api/abort", "/api/retry"} {
+	for _, ep := range []string{"/api/state", "/api/retry"} {
 		if !strings.Contains(html, ep) {
-			t.Errorf("进度页未引用端点 %s，前端轮询/中止逻辑将失效", ep)
+			t.Errorf("安装进度页未引用端点 %s，前端轮询/重试逻辑将失效", ep)
 		}
 	}
-	// 前端自动跳转依赖的 phase 关键字
-	for _, phase := range []string{"downloading", "installing", "restarting", "done", "failed"} {
+	// 安装阶段不可终止：不得再暴露中止入口
+	for _, gone := range []string{"/api/abort", "终止更新"} {
+		if strings.Contains(html, gone) {
+			t.Errorf("安装进度页不应再包含 %q（安装阶段不提供终止）", gone)
+		}
+	}
+	// 前端自动跳转依赖的 phase 关键字（安装六步 + 终态）
+	for _, phase := range []string{"verifying-pkg", "stopping", "backing-up", "installing", "restarting", "verifying", "done", "failed"} {
 		if !strings.Contains(html, phase) {
-			t.Errorf("进度页缺少 phase %q，状态展示将不完整", phase)
+			t.Errorf("安装进度页缺少 phase %q，状态展示将不完整", phase)
 		}
 	}
 }

@@ -37,9 +37,14 @@ export const getPermissionList = () => request.get('/permissions/list')
 // 部门列表
 export const getDepartments = () => request.get('/departments')
 
-// 系统版本与热更新
+// 系统版本与热更新（两阶段：先下载校验，再停机安装）
 export const getVersion = () => request.get('/system/version')
 export const checkUpdate = () => request.get('/admin/update/check')
-export const startUpdate = () => request.post('/admin/update/start')
+export const startDownload = () => request.post('/admin/update/download')
+export const getDownloadProgress = () => request.get('/admin/update/progress')
+export const cancelDownload = () => request.post('/admin/update/cancel-download')
+export const installUpdate = () => request.post('/admin/update/install')
 export const getUpdateStatus = () => request.get('/admin/update/status')
 export const getUpdateLog = () => request.get('/admin/update/log')
+export const getMirrors = () => request.get('/admin/update/mirrors')
+export const saveMirrors = (mirrors) => request.put('/admin/update/mirrors', { mirrors })

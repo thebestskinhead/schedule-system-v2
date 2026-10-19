@@ -12,6 +12,7 @@ import "schedule-system-v2/backend/internal/model"
 var RolePermissions = map[string][]Permission{
 	model.RoleAdmin: {
 		PermSystemAdmin,
+		PermSystemManage,
 		// 用户管理权限组
 		PermUserProfile, PermUserManage, PermUserManageAll, PermUserManageDept, PermUserSetRole, PermUserView, PermUserEdit,
 		// 无课表权限

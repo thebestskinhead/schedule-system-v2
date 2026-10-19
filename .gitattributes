@@ -6,3 +6,9 @@
 *.go          text eol=lf
 *.bat         text eol=crlf
 *.ps1         text eol=crlf
+
+# 工具与缓存
+*.exe         binary
+*.zip         binary
+*.tar.gz      binary
+*.db          binary

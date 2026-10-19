@@ -1602,7 +1602,7 @@ POST /admin/temp-permissions/cleanup
 Authorization: Bearer <token>
 ```
 
-**权限要求:** `system:admin`
+**权限要求:** `system:manage`
 
 ---
 
@@ -1696,7 +1696,7 @@ GET /admin/smtp/configs
 Authorization: Bearer <token>
 ```
 
-**权限要求:** `system:admin`
+**权限要求:** `system:manage`
 
 ### 2. 获取当前活跃SMTP配置
 
@@ -1705,7 +1705,7 @@ GET /admin/smtp/config
 Authorization: Bearer <token>
 ```
 
-**权限要求:** `system:admin`
+**权限要求:** `system:manage`
 
 **响应示例:**
 
@@ -1749,7 +1749,7 @@ Authorization: Bearer <token>
 
 保存后该配置即作为当前生效的配置。
 
-**权限要求:** `system:admin`
+**权限要求:** `system:manage`
 
 ### 4. 删除SMTP配置
 
@@ -1760,7 +1760,7 @@ Authorization: Bearer <token>
 
 **路径参数:** `id` - 配置ID
 
-**权限要求:** `system:admin`
+**权限要求:** `system:manage`
 
 ### 5. 测试SMTP发送
 
@@ -1785,7 +1785,7 @@ Authorization: Bearer <token>
 
 省略上述配置项时使用已保存的配置发送；携带 `host` 时直接使用请求中的配置发送（无需先保存）。
 
-**权限要求:** `system:admin`
+**权限要求:** `system:manage`
 
 ---
 
@@ -1798,7 +1798,7 @@ GET /admin/site/config
 Authorization: Bearer <token>
 ```
 
-**权限要求:** `system:admin`
+**权限要求:** `system:manage`
 
 **响应示例:**
 
@@ -1822,7 +1822,7 @@ Authorization: Bearer <token>
 |------|------|------|------|
 | domain | string | 是 | 站点域名 |
 
-**权限要求:** `system:admin`
+**权限要求:** `system:manage`
 
 ---
 

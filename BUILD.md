@@ -22,7 +22,7 @@ npm test
 | 后端单元测试 | `backend/internal/**/*_test.go` | 表驱动用例，中文断言信息，不依赖外网 |
 | 后端集成测试 | `backend/internal/router/update_integration_test.go` | 真实 `SetupRouter` + httptest；含**前后端 API 契约测试**：解析 `frontend-v2/src/api/*.js` 的全部请求，逐一校验后端路由已注册，接口漂移在 CI 即失败 |
 | 数据库集成测试 | `//go:build integration` 标签文件 | 需真实 MySQL，默认不随 `go test ./...` 运行 |
-| 前端单元测试 | `frontend-v2/src/**/*.test.js` | vitest + @vue/test-utils；API 层校验请求方法与路径，组件层覆盖更新卡片全部交互（检查/立即更新/取消/轮询跳转/失败刷新） |
+| 前端单元测试 | `frontend-v2/src/**/*.test.js` | vitest + @vue/test-utils；API 层校验请求方法与路径，组件层覆盖更新管理页全部交互（检查/下载/取消/安装/轮询跳转/镜像管理/失败刷新） |
 
 ---
 
@@ -45,52 +45,80 @@ npm test
 
 ## 热更新（同大版本自动升级）
 
-推送 `vX.Y.Z` 标签发布后，已部署的系统可在**不手动下载整包**的情况下完成同大版本升级。
+推送 `vX.Y.Z` 标签发布后，已部署的系统可在**不手动下载整包**的情况下完成同大版本升级。更新分「下载」与「安装」两个阶段：下载阶段主进程保持运行、8080 端口正常提供服务，只有下载并校验通过后才停机安装。
 
 ### 使用方式
 
-管理员登录后进入「系统管理 / SMTP 配置」页的「系统更新」卡片：
+管理员登录后进入「系统管理 / 系统更新」页：
 
 1. **检查更新**：查询 GitHub Release 中是否存在同大版本且版本号更高的发布；
-2. **立即更新**：自动执行完整更新流程，期间 http://localhost:8080 显示更新进度页，可实时监控或随时「终止更新并恢复旧版本」。
+2. **下载更新包**：后台下载，期间系统正常服务，可随时取消；
+3. **安装更新**：下载完成且校验通过后才会出现。点击后停机安装，期间 http://localhost:8080 显示安装进度页，可实时监控，安装失败自动回滚并重启旧版本。
 
 也可在部署目录手动执行 `update.exe`（Windows）/ `./update`（Linux）：
 
 ```powershell
-update.exe --check   # 仅检查是否有可用更新，不停止服务
-update.exe           # 完整更新流程
+update.exe --check                            # 仅检查是否有可用更新，不停止服务
+update.exe download                           # 下载并校验更新包，不停止服务
+update.exe install                            # 停机安装（需下载阶段已就绪）
 ```
+
+`download` 可追加 `--mirrors` 指定镜像加速地址（多个用英文逗号分隔），未指定时读取 `configs/config.yaml` 的 `update.mirrors` 配置。
 
 ### 更新流程
 
 ```
-启动 update.exe
-  → 终止 server 进程（按可执行路径精确匹配，等待进程退出）
-  → 在 8080 端口启动进度监控页面（下载/安装进度、终止更新按钮）
-  → 检查 GitHub Release：同大版本且版本号更高才继续
-  → 下载发布压缩包（Release 附带 .sha256 时自动校验）
-  → 备份当前部署物到 updates/backup/<版本>-<时间戳>/
-  → 解压并替换 server 可执行文件与前后端构建产物（dist/、dist-mobile/）
-  → 释放 8080，自动重启 server
-  → 健康检查确认存活后 update.exe 自动退出
+阶段一：下载（主进程保持运行，8080 正常服务）
+  主程序启动 update.exe download（读取 config.yaml 的 update.mirrors 传入 --mirrors）
+    → 检查 GitHub Release：同大版本且版本号更高才继续
+    → 按镜像顺序尝试下载：镜像不可达或校验失败自动切换下一个，全部失败回退官方源直连
+    → 下载进度实时写入 updates/download-state.json（2 秒心跳，主程序据此刷新页面）
+    → 下载完成后自动校验 sha256，通过则状态置为「就绪」，等待安装指令
+
+阶段二：安装（此时才停机）
+  主程序启动 update.exe install
+    → 安装前预检：磁盘剩余空间不小于 2 倍包大小、备份目录可写
+    → 终止 server 进程（按可执行路径精确匹配，等待进程退出）
+    → 在 8080 端口启动进度监控页面（安装进度，不含终止按钮）
+    → 备份当前部署物到 updates/backup/<版本>-<时间戳>/
+    → 解压并替换 server 可执行文件与前后端构建产物（dist/、dist-mobile/）
+    → 释放 8080，自动重启 server
+    → 健康检查确认存活后 update.exe 自动退出
 ```
 
-任一步骤失败或用户点击终止：自动从备份回滚并重启旧版本，结果写入 `updates/last-result.json`（管理端「上次更新」展示），详细日志见 `updates/update.log`。
+任一步骤失败：自动从备份回滚并重启旧版本，结果写入 `updates/last-result.json`（管理端「上次更新」展示），详细日志见 `updates/update.log`。
 
 ### 安全边界
 
 - **只替换构建产物**：`server.exe`/`server`、`dist/`、`dist-mobile/`；数据库配置（`configs/`）、迁移脚本（`migrations/`）、日志一律不触碰；
 - **同大版本才允许热更新**：大版本可能包含数据库结构变更，需手动下载整包并按发布说明迁移；
-- 失败自动回滚：安装前必先备份，回滚后重启旧版本并验证存活。
+- **失败自动回滚**：安装前必先备份，回滚后重启旧版本并验证存活；
+- **校验未通过不安装**：sha256 校验失败时下载状态置为失败，不会进入安装阶段；
+- **镜像模式强制校验**：指定镜像下载时必须提供 sha256，缺失即判失败（镜像内容不可信）。
+
+### 镜像加速
+
+下载官方源缓慢或不可达时，可配置镜像地址。编辑 `configs/config.yaml`：
+
+```yaml
+update:
+  mirrors:
+    - https://ghproxy.net/https://github.com
+    - https://mirror.ghproxy.com/https://github.com
+```
+
+也可在「系统管理 / 系统更新」页的镜像管理区维护（支持保存、增删、一键填入常用地址），保存后立即写入 `configs/config.yaml`，下次下载生效。
+
+镜像仅用于下载发布包，版本查询与 sha256 校验值始终取自官方源，镜像无法篡改版本信息。
 
 ### 网络要求
 
-热更新需服务端可访问 GitHub：
+更新需服务端可访问 GitHub：
 
 | 域名 | 用途 |
 |------|------|
-| `api.github.com` | 查询 Release 列表 |
-| `github.com`、`objects.githubusercontent.com` | 下载发布包 |
+| `api.github.com` | 查询 Release 列表、获取 sha256（始终直连） |
+| `github.com`、`objects.githubusercontent.com` | 下载发布包（官方源） |
 
 处于受限网络（表现为 DNS 解析失败 / 连接超时，检查更新返回「无法解析 api.github.com」或「连接 GitHub 超时」）时，可设置代理后重启服务与更新程序：
 
@@ -102,9 +130,15 @@ set HTTPS_PROXY=http://127.0.0.1:7890
 export HTTPS_PROXY=http://127.0.0.1:7890
 ```
 
-Go 的 HTTP 客户端自动识别 `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` 环境变量，API 查询与安装包下载均走代理。此外可设置 `GITHUB_TOKEN` 提升 API 额度（未认证限流 60 次/小时）。
+Go 的 HTTP 客户端自动识别 `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` 环境变量。查询 Release 与官方源下载走代理；镜像下载不走代理（镜像本身面向国内网络）。此外可设置 `GITHUB_TOKEN` 提升 API 额度（未认证限流 60 次/小时）。
 
 检查更新失败仅影响更新检查本身，不影响系统正常运行。
+
+### 下载中断保护
+
+- 下载过程中连续 120 秒无流量即判定超时失败；
+- 进度文件心跳超过 30 秒未刷新，主程序将对应下载任务标记为失败并回收子进程；
+- 同一用户重复提交下载会作废此前的下载任务，避免并发下载互相覆盖。
 
 ### 版本号约定
 

@@ -19,7 +19,7 @@
 **权限范围**: 
 - 拥有系统的所有权限
 - 可以设置用户的系统角色
-- 可以配置系统参数（SMTP等）
+- 可以配置系统参数与系统更新（SMTP、系统更新）
 - 可以进行临时权限授权
 
 **典型用户**: 系统维护人员、超级管理员
@@ -107,6 +107,7 @@ user:manage:all (用户管理-全部)
 | `user:manage:all` | 用户管理(全部) | 管理所有用户 | 办公室管理员 |
 | `schedule:manage:dept` | 排班管理(部门) | 管理本部门排班 | 部门管理员 |
 | `user:manage:dept` | 用户管理(部门) | 管理本部门成员 | 部门管理员 |
+| `system:manage` | 系统管理 | SMTP 服务设置、系统更新 | 系统管理员 |
 
 ## 权限申请系统
 
@@ -361,7 +362,8 @@ func (c *auth.Checker) CanAccessDept(dept string) bool {
 system:admin (系统管理员)
     ├── 所有权限
     ├── 可以设置系统角色
-    └── 可以审批所有权限申请
+    ├── 可以审批所有权限申请
+    └── 系统管理（system:manage：SMTP 服务设置、系统更新）
 
 office_admin (办公室管理员：派生身份，department=办公室 + dept_role=dept_admin，非存储角色)
     ├── schedule:manage:all

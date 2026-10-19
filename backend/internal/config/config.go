@@ -17,11 +17,19 @@ type Config struct {
 	Database  DatabaseConfig  `yaml:"database"`
 	JWT       JWTConfig       `yaml:"jwt"`
 	Site      SiteConfig      `yaml:"site"`      // 网站配置
+	Update    UpdateConfig    `yaml:"update"`    // 系统更新配置
 	Installed bool            `yaml:"installed"` // 是否已完成安装
 }
 
 type SiteConfig struct {
 	Domain string `yaml:"domain" json:"domain"` // 网站域名，用于生成重置密码链接
+}
+
+// UpdateConfig 系统更新配置
+type UpdateConfig struct {
+	// Mirrors 镜像加速地址（有序）。下载安装包时按列表顺序以前缀方式拼接
+	// GitHub 资产地址尝试，全部失败后回退直连；置空表示全部直连。
+	Mirrors []string `yaml:"mirrors" json:"mirrors"`
 }
 
 type ServerConfig struct {
@@ -45,8 +53,8 @@ type JWTConfig struct {
 
 var GlobalConfig *Config
 
-// 配置文件路径（固定）
-const ConfigFilePath = "configs/config.yaml"
+// ConfigFilePath 配置文件路径（相对工作目录；测试可覆盖）
+var ConfigFilePath = "configs/config.yaml"
 
 // DevConfigFilePath 开发模式配置文件路径（仅 go run 直接运行时读取）
 const DevConfigFilePath = "configs/dev.yaml"

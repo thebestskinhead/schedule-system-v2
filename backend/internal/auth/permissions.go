@@ -8,7 +8,8 @@ type Permission = model.Permission
 // 权限常量（重新导出 model 包的权限常量，便于使用）
 const (
 	// 系统级权限
-	PermSystemAdmin Permission = "system:admin"
+	PermSystemAdmin  Permission = "system:admin"  // 超级管理员（临时权限清理等）
+	PermSystemManage Permission = "system:manage" // 系统管理（SMTP 服务设置、系统更新）
 
 	// 用户相关权限
 	PermUserProfile    Permission = "user:profile"

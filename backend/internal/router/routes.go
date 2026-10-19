@@ -158,19 +158,24 @@ func buildRoutes(h *Handlers) []RouteDef {
 		{Method: "GET", Path: "/admin/templates/placeholders", Auth: true, Perms: []auth.Permission{auth.PermTemplateView}, Handler: h.Template.GetPlaceholderHelp},
 
 		// ========== SMTP / 网站配置（系统管理员） ==========
-		{Method: "GET", Path: "/admin/smtp/configs", Auth: true, Perms: []auth.Permission{auth.PermSystemAdmin}, Handler: h.SMTP.GetConfigs},
-		{Method: "GET", Path: "/admin/smtp/config", Auth: true, Perms: []auth.Permission{auth.PermSystemAdmin}, Handler: h.SMTP.GetActiveConfig},
-		{Method: "POST", Path: "/admin/smtp/config", Auth: true, Perms: []auth.Permission{auth.PermSystemAdmin}, Handler: h.SMTP.SaveConfig},
-		{Method: "DELETE", Path: "/admin/smtp/config/:id", Auth: true, Perms: []auth.Permission{auth.PermSystemAdmin}, Handler: h.SMTP.DeleteConfig},
-		{Method: "POST", Path: "/admin/smtp/test", Auth: true, Perms: []auth.Permission{auth.PermSystemAdmin}, Handler: h.SMTP.TestEmail},
-		{Method: "GET", Path: "/admin/site/config", Auth: true, Perms: []auth.Permission{auth.PermSystemAdmin}, Handler: h.SMTP.GetSiteConfig},
-		{Method: "POST", Path: "/admin/site/config", Auth: true, Perms: []auth.Permission{auth.PermSystemAdmin}, Handler: h.SMTP.SaveSiteConfig},
+		{Method: "GET", Path: "/admin/smtp/configs", Auth: true, Perms: []auth.Permission{auth.PermSystemManage}, Handler: h.SMTP.GetConfigs},
+		{Method: "GET", Path: "/admin/smtp/config", Auth: true, Perms: []auth.Permission{auth.PermSystemManage}, Handler: h.SMTP.GetActiveConfig},
+		{Method: "POST", Path: "/admin/smtp/config", Auth: true, Perms: []auth.Permission{auth.PermSystemManage}, Handler: h.SMTP.SaveConfig},
+		{Method: "DELETE", Path: "/admin/smtp/config/:id", Auth: true, Perms: []auth.Permission{auth.PermSystemManage}, Handler: h.SMTP.DeleteConfig},
+		{Method: "POST", Path: "/admin/smtp/test", Auth: true, Perms: []auth.Permission{auth.PermSystemManage}, Handler: h.SMTP.TestEmail},
+		{Method: "GET", Path: "/admin/site/config", Auth: true, Perms: []auth.Permission{auth.PermSystemManage}, Handler: h.SMTP.GetSiteConfig},
+		{Method: "POST", Path: "/admin/site/config", Auth: true, Perms: []auth.Permission{auth.PermSystemManage}, Handler: h.SMTP.SaveSiteConfig},
 
-		// ========== 热更新（系统管理员） ==========
-		{Method: "GET", Path: "/admin/update/check", Auth: true, Perms: []auth.Permission{auth.PermSystemAdmin}, Handler: h.Update.CheckUpdate},
-		{Method: "POST", Path: "/admin/update/start", Auth: true, Perms: []auth.Permission{auth.PermSystemAdmin}, Handler: h.Update.StartUpdate},
-		{Method: "GET", Path: "/admin/update/status", Auth: true, Perms: []auth.Permission{auth.PermSystemAdmin}, Handler: h.Update.GetUpdateStatus},
-		{Method: "GET", Path: "/admin/update/log", Auth: true, Perms: []auth.Permission{auth.PermSystemAdmin}, Handler: h.Update.UpdateLogTail},
+		// ========== 系统更新（系统管理员） ==========
+		{Method: "GET", Path: "/admin/update/check", Auth: true, Perms: []auth.Permission{auth.PermSystemManage}, Handler: h.Update.CheckUpdate},
+		{Method: "POST", Path: "/admin/update/download", Auth: true, Perms: []auth.Permission{auth.PermSystemManage}, Handler: h.Update.StartDownload},
+		{Method: "GET", Path: "/admin/update/progress", Auth: true, Perms: []auth.Permission{auth.PermSystemManage}, Handler: h.Update.GetDownloadProgress},
+		{Method: "POST", Path: "/admin/update/cancel-download", Auth: true, Perms: []auth.Permission{auth.PermSystemManage}, Handler: h.Update.CancelDownload},
+		{Method: "POST", Path: "/admin/update/install", Auth: true, Perms: []auth.Permission{auth.PermSystemManage}, Handler: h.Update.StartInstall},
+		{Method: "GET", Path: "/admin/update/mirrors", Auth: true, Perms: []auth.Permission{auth.PermSystemManage}, Handler: h.Update.GetMirrors},
+		{Method: "PUT", Path: "/admin/update/mirrors", Auth: true, Perms: []auth.Permission{auth.PermSystemManage}, Handler: h.Update.SaveMirrors},
+		{Method: "GET", Path: "/admin/update/status", Auth: true, Perms: []auth.Permission{auth.PermSystemManage}, Handler: h.Update.GetUpdateStatus},
+		{Method: "GET", Path: "/admin/update/log", Auth: true, Perms: []auth.Permission{auth.PermSystemManage}, Handler: h.Update.UpdateLogTail},
 	}
 
 	// ========== 应用系统（申请/审批） ==========

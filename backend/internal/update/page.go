@@ -1,13 +1,13 @@
 package update
 
-// ProgressPageHTML 更新进度监控页面（单文件、零外部依赖，内嵌于 update.exe）。
-// 页面通过轮询 /api/state 展示进度，支持「终止更新并恢复旧版本」。
+// ProgressPageHTML 安装进度监控页面（单文件、零外部依赖，内嵌于 update.exe）。
+// 页面通过轮询 /api/state 展示安装进度；安装阶段不可终止，失败后可重试或自动恢复。
 const ProgressPageHTML = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>系统更新 - 排班管理系统</title>
+<title>正在安装更新 - 排班管理系统</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -65,7 +65,6 @@ const ProgressPageHTML = `<!DOCTYPE html>
     transition: opacity .2s;
   }
   button:disabled { opacity: .5; cursor: not-allowed; }
-  .btn-danger { background: #f56c6c; color: #fff; }
   .btn-primary { background: #409eff; color: #fff; }
   .btn-default { background: #fff; color: #606266; border: 1px solid #dcdfe6; }
   .banner {
@@ -81,8 +80,8 @@ const ProgressPageHTML = `<!DOCTYPE html>
 </head>
 <body>
 <div class="card">
-  <h1><span class="spinner" id="spin"></span> 系统热更新</h1>
-  <div class="sub">更新程序正在后台工作，请保持本页面打开。更新期间服务将短暂中断。</div>
+  <h1><span class="spinner" id="spin"></span> 正在安装更新</h1>
+  <div class="sub">更新程序正在后台工作，请保持本页面打开。安装期间服务将短暂中断。</div>
 
   <div class="banner" id="banner"></div>
 
@@ -93,13 +92,12 @@ const ProgressPageHTML = `<!DOCTYPE html>
   </div>
 
   <div class="steps" id="steps">
-    <div class="step" data-step="stopping"><span class="dot">1</span>停止服务</div>
-    <div class="step" data-step="checking"><span class="dot">2</span>检查更新</div>
-    <div class="step" data-step="downloading"><span class="dot">3</span>下载更新包</div>
-    <div class="step" data-step="backing-up"><span class="dot">4</span>备份当前版本</div>
-    <div class="step" data-step="installing"><span class="dot">5</span>应用新版本</div>
-    <div class="step" data-step="restarting"><span class="dot">6</span>重启服务</div>
-    <div class="step" data-step="verifying"><span class="dot">7</span>验证服务</div>
+    <div class="step" data-step="verifying-pkg"><span class="dot">1</span>校验安装包</div>
+    <div class="step" data-step="stopping"><span class="dot">2</span>停止服务</div>
+    <div class="step" data-step="backing-up"><span class="dot">3</span>备份当前版本</div>
+    <div class="step" data-step="installing"><span class="dot">4</span>应用新版本</div>
+    <div class="step" data-step="restarting"><span class="dot">5</span>重启服务</div>
+    <div class="step" data-step="verifying"><span class="dot">6</span>验证服务</div>
   </div>
 
   <div class="progress-wrap">
@@ -114,16 +112,15 @@ const ProgressPageHTML = `<!DOCTYPE html>
   <div class="logs" id="logs"></div>
 
   <div class="actions">
-    <button class="btn-danger" id="btnAbort" onclick="abort()">终止更新并恢复旧版本</button>
     <button class="btn-primary" id="btnDone" style="display:none" onclick="location.href='/'">进入系统</button>
     <button class="btn-default" id="btnRetry" style="display:none" onclick="retry()">重试更新</button>
   </div>
 </div>
 
 <script>
-var STEP_ORDER = ['stopping','checking','downloading','backing-up','installing','restarting','verifying'];
+var STEP_ORDER = ['verifying-pkg','stopping','backing-up','installing','restarting','verifying'];
 // 进入这些阶段后页面将自动刷新（服务端口已交还给 server，刷新后即进入系统）
-var RELOAD_PHASES = ['done','restarting','verifying','rolled-back','aborted'];
+var RELOAD_PHASES = ['done','restarting','verifying','rolled-back'];
 var logCount = 0;
 var reloadTimer = null;
 
@@ -140,7 +137,7 @@ function setStep(phase) {
   document.querySelectorAll('.step').forEach(function(el) {
     var s = el.getAttribute('data-step');
     el.classList.remove('active','done','failed');
-    if (phase === 'failed' || phase === 'aborted' || phase === 'rolled-back') {
+    if (phase === 'failed' || phase === 'rolled-back') {
       if (idx >= 0 && STEP_ORDER.indexOf(s) < idx) el.classList.add('done');
     } else if (idx >= 0) {
       if (STEP_ORDER.indexOf(s) < idx) el.classList.add('done');
@@ -162,7 +159,7 @@ function render(st) {
   setStep(st.phase);
 
   var spin = document.getElementById('spin');
-  spin.style.display = (st.phase === 'done' || st.phase === 'failed' || st.phase === 'aborted' || st.phase === 'rolled-back') ? 'none' : 'inline-block';
+  spin.style.display = (st.phase === 'done' || st.phase === 'failed' || st.phase === 'rolled-back') ? 'none' : 'inline-block';
 
   var logsEl = document.getElementById('logs');
   if (st.logs && st.logs.length !== logCount) {
@@ -174,9 +171,8 @@ function render(st) {
     logCount = st.logs.length;
   }
 
-  document.getElementById('btnAbort').style.display = st.canAbort ? 'inline-block' : 'none';
   document.getElementById('btnRetry').style.display = (st.phase === 'failed') ? 'inline-block' : 'none';
-  document.getElementById('btnDone').style.display = (st.phase === 'done' || st.phase === 'rolled-back' || st.phase === 'aborted') ? 'inline-block' : 'none';
+  document.getElementById('btnDone').style.display = (st.phase === 'done' || st.phase === 'rolled-back') ? 'inline-block' : 'none';
 
   // 端口已交还给 server：自动刷新，服务恢复后即进入系统
   if (RELOAD_PHASES.indexOf(st.phase) >= 0 && !reloadTimer) {
@@ -190,21 +186,15 @@ function render(st) {
     document.getElementById('banner').textContent = '更新完成，服务正在恢复，页面即将自动刷新进入系统…';
   } else if (st.phase === 'failed') {
     document.getElementById('banner').style.display = 'block';
-    document.getElementById('banner').textContent = '更新失败：' + (st.error || '未知错误') + '。可点击「重试更新」，或等待 ' + (st.autoAbortIn || 60) + ' 秒后自动恢复旧版本。';
-  } else if (st.phase === 'rolled-back' || st.phase === 'aborted') {
+    document.getElementById('banner').textContent = '安装失败：' + (st.error || '未知错误') + '。可点击「重试更新」，或等待 ' + (st.autoAbortIn || 60) + ' 秒后自动恢复更新前的版本。';
+  } else if (st.phase === 'rolled-back') {
     document.getElementById('banner').style.display = 'block';
-    document.getElementById('banner').textContent = '更新已终止，服务正在恢复为旧版本，页面即将自动刷新…';
+    document.getElementById('banner').textContent = '安装未成功，服务正在恢复为更新前的版本，页面即将自动刷新…';
   }
 }
 
 function poll() {
   fetch('/api/state').then(function(r) { return r.json(); }).then(render).catch(function() {});
-}
-
-function abort() {
-  if (!confirm('确定要终止本次更新吗？\n系统将恢复到更新前的版本并重启服务。')) return;
-  document.getElementById('btnAbort').disabled = true;
-  fetch('/api/abort', { method: 'POST' }).catch(function() {});
 }
 
 function retry() {

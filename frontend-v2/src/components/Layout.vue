@@ -106,6 +106,7 @@ const manageNavItems = computed(() => {
   }
   if (userStore.isAdmin) {
     items.push({ path: '/admin/smtp', name: 'SMTP配置', icon: 'Message' })
+    items.push({ path: '/admin/update', name: '系统更新', icon: 'Refresh' })
   }
   return items
 })
